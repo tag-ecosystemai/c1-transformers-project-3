@@ -441,6 +441,112 @@ def test_abandoned_investigation_runs_no_further_tools(high_risk, monkeypatch):
         next(events)
 
 
+def record_tool_executions(monkeypatch, log: list) -> None:
+    """
+    Wrap every tool so that the moment it actually executes is appended
+    to the same log as the events the consumer receives.
+    """
+    for tool in EXPECTED_TOOLS:
+        original = getattr(agent_service, tool)
+
+        def recorded(*args, _tool=tool, _original=original, **kwargs):
+            log.append(("executes", _tool))
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(agent_service, tool, recorded)
+
+
+def test_tool_start_is_received_before_the_tool_executes(
+    high_risk,
+    monkeypatch,
+):
+    log = []
+    record_tool_executions(monkeypatch, log)
+
+    for event in iter_investigation("SHP-153440"):
+        log.append((event.event, event.data.get("name")))
+
+    # Each tool runs only after its tool_start reached the consumer, and
+    # no tool runs ahead of the events that precede it.
+    expected = []
+    for tool in EXPECTED_TOOLS:
+        expected += [
+            ("tool_start", tool),
+            ("executes", tool),
+            ("tool_complete", tool),
+        ]
+    assert log[:-2] == expected
+    assert [name for name, _ in log[-2:]] == ["message", "done"]
+
+
+def test_consumer_stopping_after_first_event_runs_no_tool(
+    high_risk,
+    monkeypatch,
+):
+    log = []
+    record_tool_executions(monkeypatch, log)
+
+    events = iter_investigation("SHP-153440")
+    assert next(events).event == "tool_start"
+    events.close()
+
+    assert log == []
+
+
+def test_both_optional_failures_keep_order_and_match_synchronous_response(
+    client,
+    high_risk,
+    monkeypatch,
+):
+    def broken_context(shipment):
+        raise RuntimeError("context source unavailable")
+
+    def weather_unavailable(shipment):
+        raise WeatherServiceError("Open-Meteo request failed.")
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_historical_delay_context",
+        broken_context,
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "get_destination_weather",
+        weather_unavailable,
+    )
+
+    events = stream(client)
+    name, done = events[-1]
+
+    assert name == "done"
+    assert [
+        (name, data["name"])
+        for name, data in events
+        if name.startswith("tool_")
+    ][4:] == [
+        ("tool_start", "get_historical_delay_context"),
+        ("tool_error", "get_historical_delay_context"),
+        ("tool_start", "get_destination_weather"),
+        ("tool_error", "get_destination_weather"),
+    ]
+    assert [(call["tool"], call["status"]) for call in done["tool_trace"]] == [
+        ("get_delay_risk", "success"),
+        ("get_shipment", "success"),
+        ("get_historical_delay_context", "error"),
+        ("get_destination_weather", "error"),
+    ]
+    # Failures first, in the order the tools ran, then the standing notes.
+    assert done["limitations"] == [
+        "Historical delay context was not collected: "
+        "context source unavailable",
+        "Weather evidence was not collected: Open-Meteo request failed.",
+        *STANDING_LIMITATIONS,
+    ]
+    assert done["evidence"]["historical_delay_summary"] is None
+    assert done["evidence"]["weather_summary"] is None
+    assert done == client.post("/api/agent/investigate/SHP-153440").json()
+
+
 def test_synchronous_run_returns_the_streamed_briefing(high_risk):
     streamed = list(iter_investigation("SHP-153440"))
 
