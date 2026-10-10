@@ -11,6 +11,7 @@ from backend.models.schemas import (
 )
 from backend.services import agent_service
 from backend.services.agent_service import (
+    INVENTORY_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     run_investigation,
@@ -23,9 +24,13 @@ EXPECTED_TOOLS = [
     "get_shipment",
     "get_historical_delay_context",
     "get_destination_weather",
+    "get_inventory_coverage",
 ]
 
+# The inventory step runs last, so the note on its record follows any
+# failure and comes before the notes that apply to every briefing.
 STANDING_LIMITATIONS = [
+    INVENTORY_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
@@ -80,6 +85,7 @@ def test_tool_trace_records_each_call_in_order(high_risk):
     assert trace[1].output["shipment_reference"] == "SHP-153440"
     assert trace[2].output["highest_delay_rate_factor"] == "product"
     assert trace[3].output["source"] == "Open-Meteo historical archive"
+    assert trace[4].output["inventory_coverage_days"] == 17.13
 
 
 def test_limitations_list_uncollected_evidence(high_risk):
@@ -111,7 +117,7 @@ def test_weather_failure_becomes_limitation(high_risk, monkeypatch):
 
     briefing = run_investigation("SHP-153440")
 
-    failed_call = briefing.tool_trace[-1]
+    failed_call = briefing.tool_trace[3]
     assert failed_call.tool == "get_destination_weather"
     assert failed_call.status == ToolCallStatus.ERROR
     assert failed_call.error == "Open-Meteo did not respond within 10 seconds."

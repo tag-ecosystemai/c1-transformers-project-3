@@ -10,6 +10,7 @@ The shipment investigation, orchestrated as a LangGraph workflow.
     evidence sources, in order (EVIDENCE_SOURCES)
         get_historical_delay_context
         get_destination_weather
+        get_inventory_coverage
         (an optional failure becomes a limitation; any other
          failure ends the investigation)
         v
@@ -30,6 +31,7 @@ Callers use iter_investigation() and run_investigation(). The graph
 and its state stay inside this module and are never sent to a client.
 """
 
+import logging
 import operator
 from contextlib import closing
 from dataclasses import dataclass
@@ -42,6 +44,7 @@ from pydantic import BaseModel
 
 from backend.models.schemas import (
     DisruptionBriefingResponse,
+    InventoryStatusResponse,
     PredictionResponse,
     ShipmentResponse,
     ToolCall,
@@ -56,9 +59,13 @@ from backend.services.agent_tools import (
     get_delay_risk,
     get_destination_weather,
     get_historical_delay_context,
+    get_inventory_coverage,
     get_shipment,
 )
 from backend.services.briefing_service import generate_rag_briefing
+
+
+logger = logging.getLogger(__name__)
 
 
 # Applies to every briefing, whether or not weather was collected.
@@ -68,10 +75,44 @@ WEATHER_SCOPE_LIMITATION = (
     "shipment route."
 )
 
+# Recorded whenever an inventory record is collected. The record is
+# matched on product name only, so it describes the product and never
+# the stock available to this shipment.
+INVENTORY_SCOPE_LIMITATION = (
+    "Inventory record available; stock availability for this shipment "
+    "has not been verified."
+)
+
+# Reported in place of an inventory failure's own message, which can
+# name server files and is only written to the log.
+INVENTORY_UNAVAILABLE = (
+    "No inventory record could be retrieved for this product."
+)
+
+# What the trace records of an inventory record. The warehouse and
+# supplier on a record are unrelated to the shipment, and the reorder
+# point and replenishment date cannot be related to it, so none of
+# them is reported.
+INVENTORY_TRACE_FIELDS = frozenset(
+    {
+        "product_name",
+        "current_stock",
+        "reserved_stock",
+        "available_stock",
+        "daily_demand",
+        "safety_stock",
+        "incoming_quantity",
+        "inventory_coverage_days",
+        "stockout_risk",
+        "below_safety_stock",
+        "matched_on",
+        "data_source",
+    }
+)
+
 # Evidence that this version of the investigation does not collect yet.
 UNCOLLECTED_EVIDENCE_LIMITATIONS = [
     "Supplier status was not collected: no supplier data source is available.",
-    "Inventory coverage was not collected: no inventory data source is available.",
     "Policy citations and recommended actions come from the briefing "
     "service placeholder: RAG retrieval is not yet integrated.",
 ]
@@ -176,6 +217,7 @@ def _run_tool(
     tool: str,
     tool_input: dict[str, Any],
     function: Callable[[], Any],
+    trace_output: Callable[[Any], Any] | None = None,
 ) -> tuple[ToolCall, Any, Exception | None]:
     """
     Run one tool and describe the call for the trace.
@@ -185,9 +227,13 @@ def _run_tool(
     its failure happens here and is recorded; the calling step decides
     whether the investigation can continue. Outputs are stored in JSON
     form so the trace can be returned in the API response.
+
+    The trace records the whole result unless trace_output chooses what
+    is recorded of it.
     """
     try:
         result = function()
+        recorded = result if trace_output is None else trace_output(result)
     except Exception as exc:
         call = ToolCall(
             tool=tool,
@@ -198,9 +244,9 @@ def _run_tool(
         return call, None, exc
 
     output = (
-        result.model_dump(mode="json")
-        if isinstance(result, BaseModel)
-        else result
+        recorded.model_dump(mode="json")
+        if isinstance(recorded, BaseModel)
+        else recorded
     )
 
     call = ToolCall(
@@ -256,6 +302,45 @@ def _summarize_weather(weather: dict[str, Any]) -> str:
     )
 
 
+def _format_coverage(days: float) -> str:
+    """Coverage exactly as recorded: fractions are never rounded away."""
+    amount = str(int(days)) if days.is_integer() else str(days)
+    return f"{amount} day" if days == 1 else f"{amount} days"
+
+
+def _summarize_inventory(record: InventoryStatusResponse) -> str:
+    summary = (
+        f"Inventory record for '{record.product_name}': "
+        f"{record.available_stock} units available "
+        f"({record.current_stock} in stock, {record.reserved_stock} "
+        f"reserved) against average demand of {record.daily_demand} "
+        "units per day, about "
+        f"{_format_coverage(record.inventory_coverage_days)} of coverage."
+    )
+    if record.below_safety_stock:
+        summary += (
+            " Available stock is at or below the safety-stock level of "
+            f"{record.safety_stock} units."
+        )
+    if record.incoming_quantity > 0:
+        summary += f" {record.incoming_quantity} units are recorded as incoming."
+    else:
+        summary += " No incoming replenishment is recorded."
+
+    return (
+        f"{summary} Stockout risk on record: {record.stockout_risk.value}. "
+        "This is a product-level record; stock availability for this "
+        "shipment has not been verified."
+    )
+
+
+def _inventory_trace_output(record: InventoryStatusResponse) -> dict[str, Any]:
+    return {
+        **record.model_dump(mode="json", include=INVENTORY_TRACE_FIELDS),
+        "limitation": INVENTORY_SCOPE_LIMITATION,
+    }
+
+
 # ============================================================
 # EVIDENCE SOURCES
 # ============================================================
@@ -280,6 +365,14 @@ class EvidenceSource:
     # Failures the investigation continues without. Any other failure
     # is a defect and ends the investigation.
     optional_errors: tuple[type[Exception], ...]
+    # Limitations recorded whenever the evidence is collected.
+    success_limitations: tuple[str, ...] = ()
+    # Chooses what the trace records of the tool's result. Without it
+    # the whole result is recorded.
+    trace_output: Callable[[Any], Any] | None = None
+    # Reported instead of a failure's own message, in the trace, in
+    # progress events and in the limitation. The message is logged.
+    public_error: str | None = None
 
 
 # The tools are looked up when a step runs, not when this list is
@@ -306,6 +399,20 @@ EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         ),
         limitation="Weather evidence was not collected",
         optional_errors=(WeatherServiceError,),
+    ),
+    # Nothing later depends on the inventory record, so no failure of
+    # this step ends the investigation.
+    EvidenceSource(
+        tool="get_inventory_coverage",
+        collect=lambda shipment: get_inventory_coverage(shipment),
+        summarize=lambda record: ToolEvidence(
+            inventory_summary=_summarize_inventory(record)
+        ),
+        limitation="Inventory evidence was not collected",
+        optional_errors=(Exception,),
+        success_limitations=(INVENTORY_SCOPE_LIMITATION,),
+        trace_output=lambda record: _inventory_trace_output(record),
+        public_error=INVENTORY_UNAVAILABLE,
     ),
 )
 
@@ -375,18 +482,30 @@ def _collect_evidence(
             source.tool,
             _tool_input(state),
             lambda: source.collect(shipment),
+            source.trace_output,
         )
 
         if error is None:
             try:
-                return {"tool_trace": [call], "evidence": source.summarize(result)}
+                return {
+                    "tool_trace": [call],
+                    "evidence": source.summarize(result),
+                    "limitations": list(source.success_limitations),
+                }
             except Exception as exc:
                 error = exc
+
+        reported: Any = error
+        if source.public_error is not None:
+            logger.warning("%s failed", source.tool, exc_info=error)
+            reported = source.public_error
+            if call.status == ToolCallStatus.ERROR:
+                call = call.model_copy(update={"error": reported})
 
         if isinstance(error, source.optional_errors):
             return {
                 "tool_trace": [call],
-                "limitations": [f"{source.limitation}: {error}"],
+                "limitations": [f"{source.limitation}: {reported}"],
             }
 
         return _failed(error, call)
@@ -398,8 +517,8 @@ def _generate_briefing(state: InvestigationState) -> InvestigationState:
     """
     Turn the collected evidence into the briefing.
 
-    The evidence comes from tool outputs only: supplier and inventory
-    fields stay empty rather than holding placeholder values.
+    The evidence comes from tool outputs only: a field no tool provided
+    stays empty rather than holding a placeholder value.
     """
     prediction = state["prediction"]
     standing_limitations = [
@@ -524,7 +643,7 @@ def iter_investigation(
     only shipments flagged as requiring investigation are processed.
 
     Flow: risk gate, shipment facts, historical delay context,
-    destination weather, evidence, briefing. Every tool call is recorded in the response's tool_trace.
+    destination weather, inventory record, briefing. Every tool call is recorded in the response's tool_trace.
     The risk gate and shipment facts are required; other evidence that
     cannot be collected is reported in limitations.
 

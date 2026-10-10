@@ -43,3 +43,29 @@ def test_summary_includes_collected_evidence(shipment_data):
         "destination. Historical delay rates: product 57.0%."
     )
     assert "inventory buffer of 12 days" in briefing.recommended_actions[1]
+
+
+def test_inventory_action_without_a_record_says_coverage_is_unavailable(
+    shipment_data,
+):
+    action = make_briefing(ToolEvidence()).recommended_actions[1]
+
+    assert "inventory coverage not yet available" in action
+
+
+def test_inventory_action_with_a_record_asks_for_shipment_confirmation(
+    shipment_data,
+):
+    evidence = ToolEvidence(
+        inventory_summary="Inventory record for 'Trail Running Shoe'."
+    )
+
+    action = make_briefing(evidence).recommended_actions[1]
+
+    # A product-level record is not a buffer this shipment can rely on.
+    assert action == (
+        "Trigger SOP-12: Review the inventory record and confirm that "
+        "stock is available for this shipment before relying on an "
+        "inventory buffer."
+    )
+    assert "not yet available" not in action

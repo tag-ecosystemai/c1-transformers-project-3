@@ -404,6 +404,14 @@ class ToolEvidence(BaseModel):
         description="Evidence returned by the Supplier Tool",
     )
 
+    inventory_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Product-level inventory record for the shipment's product. "
+            "It does not show that stock is available for this shipment"
+        ),
+    )
+
     inventory_coverage_days: Optional[int] = Field(
         default=None,
         ge=0,

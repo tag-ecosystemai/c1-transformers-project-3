@@ -45,6 +45,9 @@ def generate_rag_briefing(shipment_id: str, risk_level: RiskLevel, delay_probabi
 
     if evidence.inventory_coverage_days is not None:
         inventory_action = f"Trigger SOP-12: Utilize inventory buffer of {evidence.inventory_coverage_days} days to fulfill active destination orders."
+    elif evidence.inventory_summary:
+        # The inventory record describes the product, not this shipment.
+        inventory_action = "Trigger SOP-12: Review the inventory record and confirm that stock is available for this shipment before relying on an inventory buffer."
     else:
         inventory_action = "Trigger SOP-12: Confirm the available inventory buffer before fulfilling active destination orders (inventory coverage not yet available)."
 

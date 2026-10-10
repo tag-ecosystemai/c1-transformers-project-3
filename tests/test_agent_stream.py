@@ -10,6 +10,7 @@ from backend.exceptions import WeatherServiceError
 from backend.models.schemas import DisruptionBriefingResponse
 from backend.services import agent_service
 from backend.services.agent_service import (
+    INVENTORY_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     iter_investigation,
@@ -28,9 +29,13 @@ EXPECTED_TOOLS = [
     "get_shipment",
     "get_historical_delay_context",
     "get_destination_weather",
+    "get_inventory_coverage",
 ]
 
+# The inventory step runs last, so the note on its record follows any
+# failure and comes before the notes that apply to every briefing.
 STANDING_LIMITATIONS = [
+    INVENTORY_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
@@ -209,7 +214,7 @@ def test_weather_failure_emits_tool_error_and_continues(
     name, done = events[-1]
     assert name == "done"
     assert done["evidence"]["weather_summary"] is None
-    assert done["tool_trace"][-1]["status"] == "error"
+    assert done["tool_trace"][3]["status"] == "error"
     assert done["limitations"] == [
         "Weather evidence was not collected: "
         "Open-Meteo did not respond within 10 seconds.",
@@ -233,7 +238,7 @@ def test_historical_context_failure_emits_tool_error_and_continues(
 
     events = stream(client)
 
-    # The failure is reported, then the weather tool still runs.
+    # The failure is reported, then the later tools still run.
     assert [
         (name, data["name"])
         for name, data in events
@@ -243,6 +248,8 @@ def test_historical_context_failure_emits_tool_error_and_continues(
         ("tool_error", "get_historical_delay_context"),
         ("tool_start", "get_destination_weather"),
         ("tool_complete", "get_destination_weather"),
+        ("tool_start", "get_inventory_coverage"),
+        ("tool_complete", "get_inventory_coverage"),
     ]
 
     name, done = events[-1]
@@ -266,6 +273,7 @@ def test_low_risk_shipment_ends_with_not_required_error(
     monkeypatch,
 ):
     forbid(monkeypatch, "get_shipment")
+    forbid(monkeypatch, "get_inventory_coverage")
 
     events = stream(client)
 
@@ -329,6 +337,7 @@ def test_required_tool_failure_ends_stream_with_error(
     monkeypatch.setattr(agent_service, "get_shipment", broken_shipment)
     forbid(monkeypatch, "get_historical_delay_context")
     forbid(monkeypatch, "get_destination_weather")
+    forbid(monkeypatch, "get_inventory_coverage")
 
     events = stream(client)
 
@@ -361,7 +370,7 @@ def test_briefing_failure_ends_stream_with_error(
     events = stream(client)
 
     # Every tool succeeded, but without a briefing there is no done event.
-    assert names(events).count("tool_complete") == 4
+    assert names(events).count("tool_complete") == 5
     assert "tool_error" not in names(events)
     assert "done" not in names(events)
     assert events[-1][1]["status"] == 500
@@ -528,12 +537,15 @@ def test_both_optional_failures_keep_order_and_match_synchronous_response(
         ("tool_error", "get_historical_delay_context"),
         ("tool_start", "get_destination_weather"),
         ("tool_error", "get_destination_weather"),
+        ("tool_start", "get_inventory_coverage"),
+        ("tool_complete", "get_inventory_coverage"),
     ]
     assert [(call["tool"], call["status"]) for call in done["tool_trace"]] == [
         ("get_delay_risk", "success"),
         ("get_shipment", "success"),
         ("get_historical_delay_context", "error"),
         ("get_destination_weather", "error"),
+        ("get_inventory_coverage", "success"),
     ]
     # Failures first, in the order the tools ran, then the standing notes.
     assert done["limitations"] == [

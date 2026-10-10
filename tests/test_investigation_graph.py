@@ -15,6 +15,7 @@ from backend.services import agent_service, agent_tools
 from backend.services.agent_service import (
     EVIDENCE_SOURCES,
     INVESTIGATION_GRAPH,
+    INVENTORY_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     EvidenceSource,
@@ -31,9 +32,13 @@ EXPECTED_TOOLS = [
     "get_shipment",
     "get_historical_delay_context",
     "get_destination_weather",
+    "get_inventory_coverage",
 ]
 
+# The inventory step runs last, so the note on its record follows any
+# failure and comes before the notes that apply to every briefing.
 STANDING_LIMITATIONS = [
+    INVENTORY_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
@@ -111,8 +116,10 @@ def test_graph_routes_are_explicit():
         ("get_shipment", "__end__"),
         ("get_historical_delay_context", "get_destination_weather"),
         ("get_historical_delay_context", "__end__"),
-        ("get_destination_weather", "generate_briefing"),
+        ("get_destination_weather", "get_inventory_coverage"),
         ("get_destination_weather", "__end__"),
+        ("get_inventory_coverage", "generate_briefing"),
+        ("get_inventory_coverage", "__end__"),
         ("generate_briefing", "__end__"),
     }
 
@@ -144,6 +151,7 @@ def test_low_risk_routes_to_not_required_and_stops(low_risk, monkeypatch):
         "get_shipment",
         "get_historical_delay_context",
         "get_destination_weather",
+        "get_inventory_coverage",
         "generate_rag_briefing",
     )
 
@@ -235,7 +243,7 @@ def test_later_steps_use_the_normalized_shipment_reference(
     # the reference the prediction returned.
     assert starts == [
         {"shipment_id": " shp-153440"},
-        *[{"shipment_id": "SHP-153440"}] * 3,
+        *[{"shipment_id": "SHP-153440"}] * 4,
     ]
     assert looked_up == ["SHP-153440"]
 
@@ -273,7 +281,7 @@ def test_optional_evidence_failure_continues_with_a_limitation(
     state = investigate()
 
     assert state["status"] is InvestigationStatus.COMPLETED
-    assert traced(state)[-1] == ("get_destination_weather", ToolCallStatus.ERROR)
+    assert traced(state)[3] == ("get_destination_weather", ToolCallStatus.ERROR)
     assert state["evidence"].weather_summary is None
     assert state["evidence"].historical_delay_summary is not None
     assert state["limitations"] == [
@@ -338,6 +346,7 @@ def test_required_step_failure_ends_the_investigation(high_risk, monkeypatch):
         monkeypatch,
         "get_historical_delay_context",
         "get_destination_weather",
+        "get_inventory_coverage",
         "generate_rag_briefing",
     )
 
@@ -398,7 +407,7 @@ def test_unexpected_weather_failure_is_fatal_not_a_limitation(
         "get_destination_weather",
         defective_weather,
     )
-    forbid(monkeypatch, "generate_rag_briefing")
+    forbid(monkeypatch, "get_inventory_coverage", "generate_rag_briefing")
 
     state = investigate()
 
@@ -420,7 +429,7 @@ def test_briefing_failure_ends_the_investigation(high_risk, monkeypatch):
 
     assert state["status"] is InvestigationStatus.FAILED
     assert state["failure"] is error
-    assert len(state["tool_trace"]) == 4
+    assert len(state["tool_trace"]) == 5
     assert "briefing" not in state
 
 

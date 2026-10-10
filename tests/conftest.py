@@ -1,10 +1,15 @@
 import pandas as pd
 import pytest
 
-from backend.models.schemas import PredictionResponse, RiskLevel
+from backend.models.schemas import (
+    InventoryStatusResponse,
+    PredictionResponse,
+    RiskLevel,
+)
 from backend.services import (
     agent_service,
     agent_tools,
+    inventory_service,
     shipment_service,
     weather_service,
 )
@@ -53,6 +58,49 @@ def no_live_weather(monkeypatch):
     yield
     weather_service.geocode_city.cache_clear()
     weather_service.get_daily_weather.cache_clear()
+
+
+# The warehouse, supplier, reorder point and replenishment date are
+# distinctive so a test can show that none of them is reported.
+INVENTORY_RECORD = InventoryStatusResponse(
+    inventory_id="INV-TEST-01",
+    product_id="PROD-TEST-01",
+    product_name="Trail Running Shoe",
+    category="Cleats",
+    department="Footwear",
+    warehouse_id="WH-TEST-07",
+    warehouse_location="Rotterdam",
+    warehouse_country="Netherlands",
+    supplier_id="SUP-TEST-99",
+    current_stock=420,
+    reserved_stock=26,
+    available_stock=394,
+    daily_demand=23,
+    safety_stock=120,
+    reorder_point=4321,
+    incoming_quantity=150,
+    expected_replenishment_date="2017-06-21",
+    inventory_coverage_days=17.13,
+    stockout_risk=RiskLevel.LOW,
+    below_safety_stock=False,
+    below_reorder_point=True,
+    matched_on=inventory_service.MATCHED_ON,
+    data_source=inventory_service.SYNTHETIC_DATA_SOURCE,
+    limitations=list(inventory_service.STANDING_LIMITATIONS),
+)
+
+
+@pytest.fixture(autouse=True)
+def fixed_inventory(monkeypatch):
+    """
+    Give the agent a fixed inventory record unless a test replaces it,
+    so investigations do not depend on the inventory dataset.
+    """
+    monkeypatch.setattr(
+        agent_service,
+        "get_inventory_coverage",
+        lambda shipment: INVENTORY_RECORD,
+    )
 
 
 SHIPMENT_RECORD = {
