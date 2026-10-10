@@ -201,7 +201,7 @@ get_delay_risk ──► RISK GATE ──► LOW: investigation not required
                                                     │
                                                     ▼
                                     RAG (Chroma + Azure embeddings)
-                                    LLM (Azure OpenAI) — both optional
+                                    LLM (Azure OpenAI) 
 ~~~
 
 ### Architecture Responsibilities
