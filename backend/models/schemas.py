@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -217,6 +217,279 @@ class PredictionResponse(BaseModel):
         ),
     )
 
+# ============================================================
+# SUPPLIER SCHEMAS
+# ============================================================
+
+
+class SupplierCandidate(BaseModel):
+    supplier_id: str = Field(
+        ...,
+        description="Synthetic supplier identifier",
+    )
+
+    supplier_name: str = Field(
+        ...,
+        description="Synthetic supplier name",
+    )
+
+    supplier_country: str = Field(
+        ...,
+        description="Country associated with the supplier",
+    )
+
+    product_category: str = Field(
+        ...,
+        description="Product category supported by the supplier",
+    )
+
+    average_lead_time_days: float = Field(
+        ...,
+        ge=0,
+        description="Average supplier lead time in days",
+    )
+
+    on_time_delivery_rate: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Historical synthetic on-time delivery rate",
+    )
+
+    cancellation_rate: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Historical synthetic cancellation rate",
+    )
+
+    quality_issue_rate: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Historical synthetic quality-issue rate",
+    )
+
+    capacity_utilization: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Synthetic supplier capacity utilization",
+    )
+
+    supplier_risk_score: float = Field(
+    ...,
+    ge=0,
+    le=100,
+    description=(
+        "Synthetic supplier operational-risk score on a "
+        "0-to-100 scale"
+    ),
+    )
+
+    supplier_risk_level: RiskLevel = Field(
+        ...,
+        description="Synthetic supplier risk classification",
+    )
+
+    data_source: str = Field(
+        ...,
+        description="Source label for the supplier record",
+    )
+
+
+class SupplierRecommendation(BaseModel):
+    category: str
+
+    destination_country: str
+
+    required_quantity: int = Field(
+        ...,
+        ge=1,
+    )
+
+    recommended_supplier: Optional[
+        SupplierCandidate
+    ] = None
+
+    alternatives: List[
+        SupplierCandidate
+    ] = Field(
+        default_factory=list,
+    )
+
+    candidate_count: int = Field(
+        ...,
+        ge=0,
+    )
+
+    data_source: str = "SYNTHETIC_MVP"
+
+    quantity_capacity_verified: bool = False
+
+    limitation: str = (
+        "Supplier records are synthetic demonstration data. "
+        "The dataset does not contain available-capacity units, "
+        "commercial terms, or verified contractual availability. "
+        "Recommendations require human validation before use."
+    )
+
+# ============================================================
+# INVENTORY SCHEMAS
+# ============================================================
+
+
+class InventoryStatusResponse(BaseModel):
+    """
+    The synthetic inventory record held for one product.
+
+    The record describes a product, not a shipment: it does not show
+    that stock is available to fulfil any particular shipment. Every
+    quantity is taken from the inventory dataset as recorded.
+    """
+
+    inventory_id: str = Field(
+        ...,
+        description="Synthetic inventory-record identifier",
+    )
+
+    product_id: str = Field(
+        ...,
+        description=(
+            "Synthetic product identifier. It exists only in the "
+            "inventory dataset and is not a shipment join key"
+        ),
+    )
+
+    product_name: str = Field(
+        ...,
+        description="Product the inventory record describes",
+    )
+
+    category: str = Field(
+        ...,
+        description="Product category",
+    )
+
+    department: str = Field(
+        ...,
+        description="Product department",
+    )
+
+    warehouse_id: str = Field(
+        ...,
+        description=(
+            "Synthetic warehouse identifier, assigned at random and "
+            "unrelated to any shipment"
+        ),
+    )
+
+    warehouse_location: str = Field(
+        ...,
+        description="Location of the synthetic warehouse",
+    )
+
+    warehouse_country: str = Field(
+        ...,
+        description="Country of the synthetic warehouse",
+    )
+
+    supplier_id: str = Field(
+        ...,
+        description=(
+            "Synthetic supplier identifier, assigned at random and "
+            "unrelated to any shipment"
+        ),
+    )
+
+    current_stock: int = Field(
+        ...,
+        ge=0,
+        description="Units in stock",
+    )
+
+    reserved_stock: int = Field(
+        ...,
+        ge=0,
+        description="Units in stock that are already reserved",
+    )
+
+    available_stock: int = Field(
+        ...,
+        ge=0,
+        description="Current stock minus reserved stock",
+    )
+
+    daily_demand: int = Field(
+        ...,
+        gt=0,
+        description="Average units demanded per day",
+    )
+
+    safety_stock: int = Field(
+        ...,
+        ge=0,
+        description="Safety-stock threshold in units",
+    )
+
+    reorder_point: int = Field(
+        ...,
+        ge=0,
+        description="Reorder-point threshold in units",
+    )
+
+    incoming_quantity: int = Field(
+        ...,
+        ge=0,
+        description="Units recorded as incoming",
+    )
+
+    expected_replenishment_date: Optional[date] = Field(
+        default=None,
+        description="Expected replenishment date when one is recorded",
+    )
+
+    inventory_coverage_days: float = Field(
+        ...,
+        ge=0,
+        description=(
+            "Available stock divided by daily demand, as recorded "
+            "(fractional days)"
+        ),
+    )
+
+    stockout_risk: RiskLevel = Field(
+        ...,
+        description="Stockout-risk classification as recorded",
+    )
+
+    below_safety_stock: bool = Field(
+        ...,
+        description="Whether available stock is at or below safety stock",
+    )
+
+    below_reorder_point: bool = Field(
+        ...,
+        description=(
+            "Whether available stock is at or below the reorder point"
+        ),
+    )
+
+    matched_on: str = Field(
+        ...,
+        description="How the record was matched to the requested product",
+    )
+
+    data_source: str = Field(
+        ...,
+        description="Source label of the inventory record",
+    )
+
+    limitations: List[str] = Field(
+        default_factory=list,
+        description="What this inventory evidence does not establish",
+    )
+
 
 # ============================================================
 # AGENT EVIDENCE AND BRIEFING SCHEMAS
@@ -245,6 +518,14 @@ class ToolEvidence(BaseModel):
     supplier_status: Optional[str] = Field(
         default=None,
         description="Evidence returned by the Supplier Tool",
+    )
+
+    inventory_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Product-level inventory record for the shipment's product. "
+            "It does not show that stock is available for this shipment"
+        ),
     )
 
     inventory_coverage_days: Optional[int] = Field(
@@ -285,6 +566,42 @@ class ToolCall(BaseModel):
         description="Error message when the tool call failed",
     )
 
+# ============================================================
+# AZURE OPENAI BRIEFING SCHEMAS
+# ============================================================
+
+
+class LLMBriefingContent(BaseModel):
+    """
+    Structured content generated by Azure OpenAI.
+
+    Factual fields such as shipment ID, risk level, probability,
+    evidence, citations, tool trace, and limitations remain controlled
+    by the backend.
+    """
+
+    summary: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Concise evidence-based disruption assessment"
+        ),
+    )
+
+    risk_factors: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Factors supported by the supplied operational evidence"
+        ),
+    )
+
+    recommended_actions: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Human-review actions grounded in supplied evidence "
+            "and retrieved operational guidance"
+        ),
+    )
 
 class DisruptionBriefingResponse(BaseModel):
     shipment_id: str = Field(

@@ -1,21 +1,18 @@
 # 🚚 Supply-Chain Disruption Agent
 
-> **AI-powered supply-chain monitoring, disruption prediction, investigation, and decision support system**
+> **AI-powered shipment delay prediction, investigation, and decision support**
 
-A three-week AI engineering project focused on building an intelligent **Supply-Chain Disruption Agent** that monitors shipment and supply-chain signals, predicts potential disruptions, investigates their causes, and recommends actionable alternatives to logistics and operations teams.
+A three-week AI engineering project: an intelligent **Supply-Chain Disruption Agent** that predicts which shipments are at risk of delay, investigates the risky ones by collecting evidence, and produces a briefing with recommended actions for logistics and operations teams.
 
 The system combines:
 
-* 🤖 AI Agents & tool calling
-* 📊 Machine Learning
-* 🔎 Retrieval-Augmented Generation (RAG)
-* 🧠 Large Language Models (LLMs)
-* 🌦️ Weather and external signals
-* 📦 Shipment and inventory data
-* 👥 Supplier intelligence
-* ☁️ Microsoft Azure
-* ⚡ FastAPI
-* ⚛️ React
+* 📊 Machine learning (XGBoost delay-risk model)
+* 🤖 An AI investigation agent orchestrated with LangGraph
+* 🔎 Retrieval-Augmented Generation (RAG) over operational procedures
+* 🧠 Azure OpenAI for briefing generation, with a deterministic fallback
+* 🌦️ Historical weather from Open-Meteo
+* 📦 Shipment, inventory, and supplier data
+* ⚡ FastAPI backend and ⚛️ React frontend
 
 ---
 
@@ -23,48 +20,34 @@ The system combines:
 
 * [1. Project Overview](#1-project-overview)
 * [2. Problem Statement](#2-problem-statement)
-* [3. Project Objectives](#3-project-objectives)
-* [4. Solution Overview](#4-solution-overview)
-* [5. System Architecture](#5-system-architecture)
-* [6. Architecture Components](#6-architecture-components)
-* [7. End-to-End Workflow](#7-end-to-end-workflow)
+* [3. Solution Overview](#3-solution-overview)
+* [4. Key Features](#4-key-features)
+* [5. Investigation Workflow](#5-investigation-workflow)
+* [6. Architecture](#6-architecture)
+* [7. API](#7-api)
 * [8. Machine Learning Layer](#8-machine-learning-layer)
-* [9. AI Agent Layer](#9-ai-agent-layer)
-* [10. RAG Layer](#10-rag-layer)
-* [11. LLM Layer](#11-llm-layer)
-* [12. Application Layer](#12-application-layer)
-* [13. Data Architecture](#13-data-architecture)
-* [14. Technology Stack](#14-technology-stack)
-* [15. Repository Structure](#15-repository-structure)
-* [16. Development Roadmap](#16-development-roadmap)
-* [17. Team Responsibilities](#17-team-responsibilities)
-* [18. Getting Started](#18-getting-started)
-* [19. Environment Variables](#19-environment-variables)
-* [20. Development Principles](#20-development-principles)
-* [21. Expected Demo](#21-expected-demo)
-* [22. Future Improvements](#22-future-improvements)
-* [23. Team](#23-team)
+* [9. RAG and Briefing Layer](#9-rag-and-briefing-layer)
+* [10. Technology Stack](#10-technology-stack)
+* [11. Repository Structure](#11-repository-structure)
+* [12. Getting Started](#12-getting-started)
+* [13. Environment Variables](#13-environment-variables)
+* [14. Running the Tests](#14-running-the-tests)
+* [15. Important Limitations](#15-important-limitations)
+* [16. Deployment Status](#16-deployment-status)
+* [17. Development Principles](#17-development-principles)
+* [18. Future Improvements](#18-future-improvements)
 
 ---
 
 # 1. Project Overview
 
-The **Supply-Chain Disruption Agent** is an AI-powered logistics decision-support system designed to identify potential shipment disruptions before they develop into major operational problems.
+The **Supply-Chain Disruption Agent** is a logistics decision-support system designed to identify potential shipment delays before they develop into operational problems.
 
-The system combines multiple supply-chain signals, including:
+Machine learning estimates the probability that a shipment will be delayed.
 
-* Shipment status
-* Expected delivery dates
-* Inventory levels
-* Supplier performance
-* Weather conditions
-* Route conditions
-* External disruption signals
-* Operational procedures and supplier knowledge
+An AI agent then investigates shipments that need attention by calling tools that collect evidence, retrieving relevant operational procedures through RAG, and generating an understandable **operations briefing with recommended actions**.
 
-Machine learning is used to estimate the probability of shipment delays or disruption.
-
-An AI agent then investigates high-risk shipments by calling appropriate tools, retrieving relevant knowledge through RAG, and using an LLM to generate an understandable **operations briefing and recommended actions**.
+The system provides decision support. Final operational decisions remain with human users.
 
 ---
 
@@ -92,53 +75,12 @@ The goal of this project is therefore to build a system that can answer:
 
 ---
 
-# 3. Project Objectives
+# 3. Solution Overview
 
-The system should be able to:
-
-### 1. Monitor
-
-Monitor shipment and supply-chain signals from multiple sources.
-
-### 2. Predict
-
-Predict whether a shipment is likely to arrive late or experience disruption.
-
-### 3. Investigate
-
-Investigate the potential causes of the disruption using external tools and data.
-
-### 4. Assess Impact
-
-Determine whether the disruption could create meaningful inventory or operational exposure.
-
-### 5. Recommend
-
-Identify potential alternative suppliers, routes, or operational actions.
-
-### 6. Explain
-
-Use RAG and an LLM to explain the situation using relevant operational knowledge.
-
-### 7. Brief
-
-Generate a concise disruption briefing for the operations team.
-
-### 8. Deploy
-
-Deploy the application as a working cloud-based AI product on Microsoft Azure.
-
----
-
-
-# 4. Solution Overview
-
-The solution is built around a **risk-first workflow**. The ML model evaluates shipments first; only shipments requiring attention move into deeper AI investigation.
+The solution is built around a **risk-first workflow**. The ML model evaluates a shipment first; only shipments requiring attention move into deeper AI investigation.
 
 ~~~text
-SUPPLY-CHAIN DATA
-       ↓
-FEATURE ENGINEERING
+SHIPMENT DATA
        ↓
 XGBOOST ML MODEL
        ↓
@@ -150,22 +92,14 @@ RISK GATE
  LOW RISK        MEDIUM / HIGH RISK
    │                   │
    ▼                   ▼
-MONITOR             AI AGENT
+NO INVESTIGATION    AI AGENT (LangGraph)
                        │
-              ┌────────┼────────┐
-              ▼        ▼        ▼
-           Shipment  Weather  Supplier
-             Tool      Tool      Tool
-              │        │        │
-              └────────┼────────┘
-                       ▼
-                TOOL EVIDENCE
+                EVIDENCE COLLECTION
+        shipment · history · weather
+           inventory · supplier
                        │
                        ▼
-                      RAG
-                       │
-                       ▼
-                      LLM
+          RAG  + LLM
                        │
                        ▼
              DISRUPTION BRIEFING
@@ -181,1068 +115,362 @@ The architecture separates five responsibilities:
 
 1. **Predict** — ML estimates delay risk.
 2. **Gate** — the risk gate determines whether deeper investigation is needed.
-3. **Investigate** — the AI agent selects and calls relevant tools.
+3. **Investigate** — the agent collects evidence from its tools.
 4. **Ground and explain** — RAG provides operational knowledge and the LLM turns the evidence into a briefing.
 5. **Decide** — the operations team reviews the result and makes the final decision.
 
-The system is therefore **not** designed to send every shipment through every tool.
+> **ML predicts. The agent investigates. Tools provide evidence. RAG provides knowledge. The LLM communicates. Humans decide.**
 
-# 5. System Architecture
+---
 
-## 5.1 High-Level Architecture
+# 4. Key Features
 
-The system uses a **risk-first, investigation-on-demand architecture**. Every shipment is first evaluated by the ML risk model. A risk gate then determines whether deeper AI investigation is required.
+* **Delay-risk prediction** — an XGBoost model returns a delay probability and a LOW / MEDIUM / HIGH risk level for a shipment.
+* **Risk gate** — LOW-risk shipments are not investigated; the investigation endpoints reject them with a clear message.
+* **Six-step evidence collection** — the agent gathers risk, shipment, historical-delay, weather, inventory, and supplier evidence (see the next section).
+* **Graceful degradation** — weather, historical context, inventory, and supplier evidence are optional. If one cannot be collected, the investigation continues and the gap is reported as a limitation.
+* **Grounded briefing** — when supporting documents are retrieved, the briefing cites them. When they are not, the briefing is still produced from the collected evidence, with no citations.
+* **Live progress** — the investigation can be streamed step by step using Server-Sent Events.
+* **Traceability** — every tool call is recorded in the response's `tool_trace`, and every caveat in `limitations`.
+* **Operations dashboard** — a React control tower showing shipments, investigations, evidence, briefings, and recommended actions.
+
+---
+
+# 5. Investigation Workflow
+
+An investigation runs six evidence-collection steps in a fixed order and then generates the briefing. The workflow is a LangGraph state graph defined in `backend/services/agent_service.py`.
+
+| # | Step (tool name) | What it collects | If it fails |
+| --- | --- | --- | --- |
+| 1 | `get_delay_risk` | Delay probability, risk level, and the risk-gate decision from the ML model | Investigation stops |
+| 2 | `get_shipment` | The shipment record (product, category, destination, shipping mode, schedule) | Investigation stops |
+| 3 | `get_historical_delay_context` | Historical delay rates for the shipment's product, market, and shipping mode | Reported as a limitation |
+| 4 | `get_destination_weather` | Historical weather at the destination city for the scheduled transit window (Open-Meteo) | Reported as a limitation |
+| 5 | `get_inventory_coverage` | The product-level inventory record for the shipment's product | Reported as a limitation |
+| 6 | `find_alternative_supplier` | Alternative supplier candidates for the shipment's product category | Reported as a limitation |
+| → | Briefing generation | Summary, recommended actions, and citations of any retrieved documents | See [section 9](#9-rag-and-briefing-layer) |
+
+The names above are the step names that appear in `tool_trace` and in the stream events. Each step calls the function of the same name in `backend/services/agent_tools.py`, except step 6: the `find_alternative_supplier` step calls `get_alternative_suppliers()`, which uses the supplier service's `find_alternative_supplier()`.
+
+After step 1 the **risk gate** applies: a shipment that does not require investigation ends there and no further tool is called.
+
+~~~text
+get_delay_risk ──► RISK GATE ──► LOW: investigation not required
+                       │
+                       ▼
+                 get_shipment
+                       ▼
+       get_historical_delay_context
+                       ▼
+          get_destination_weather
+                       ▼
+          get_inventory_coverage
+                       ▼
+         find_alternative_supplier
+                       ▼
+              generate briefing
+~~~
+
+---
+
+# 6. Architecture
 
 ~~~text
 ┌────────────────────────────────────────────────────────────────────┐
 │                         OPERATIONS USER                            │
-│                        React Dashboard                             │
+│                    React Dashboard (Vite)                          │
 └───────────────────────────────┬────────────────────────────────────┘
-                                │
+                                │  REST + Server-Sent Events
                                 ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │                         FASTAPI BACKEND                            │
 │                  API / Validation / Orchestration                  │
-└───────────────────────────────┬────────────────────────────────────┘
-                                │
-                                ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                          ML RISK LAYER                             │
-│                                                                    │
-│ DataCo → Feature Engineering → XGBoost → Probability + Risk Level │
-└───────────────────────────────┬────────────────────────────────────┘
-                                │
-                                ▼
-                       ┌──────────────────┐
-                       │     RISK GATE    │
-                       └────────┬─────────┘
-                                │
-                  ┌─────────────┴─────────────┐
-                  │                           │
-             LOW RISK                  MEDIUM / HIGH RISK
-                  │                           │
-                  ▼                           ▼
-             MONITOR /                  AI AGENT
-            QUICK CHECK                      │
-                                             │
-                         ┌───────────────────┼───────────────────┐
-                         ▼                   ▼                   ▼
-                  Shipment Tool       Weather Tool       Supplier Tool
-                         │                   │                   │
-                       DataCo            Open-Meteo       Synthetic MVP
-                         │                   │                   │
-                         └───────────────────┼───────────────────┘
-                                             │
-                                             ▼
-                                  INVESTIGATION EVIDENCE
-                                             │
-                                             ▼
-                                      RAG KNOWLEDGE
-                                             │
-                                             ▼
-                                             LLM
-                                             │
-                                             ▼
-                                  DISRUPTION BRIEFING
-                                             │
-                                             ▼
-                                  OPERATIONS DASHBOARD
-                                             │
-                                             ▼
-                                      HUMAN DECISION
+└───────────────┬───────────────────────────────┬────────────────────┘
+                │                               │
+                ▼                               ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│         ML RISK LAYER         │   │   INVESTIGATION (LangGraph)   │
+│ Preprocessor → XGBoost →      │   │ Risk gate → evidence steps →  │
+│ Probability + Risk Level      │   │ briefing                      │
+└───────────────────────────────┘   └───────────────┬───────────────┘
+                                                    │
+                    ┌───────────────┬───────────────┼───────────────┐
+                    ▼               ▼               ▼               ▼
+              Shipment data     Open-Meteo     Inventory data   Supplier data
+                 (DataCo)        (weather)      (synthetic)      (synthetic)
+                                                    │
+                                                    ▼
+                                    RAG (Chroma + Azure embeddings)
+                                    LLM (Azure OpenAI) — both optional
 ~~~
 
 ### Architecture Responsibilities
 
 | Component | Responsibility |
 | --- | --- |
-| Data layer | Prepare shipment and supporting data |
+| Data layer | Prepared shipment, inventory, and supplier datasets |
 | ML model | Estimate shipment delay risk |
 | Risk gate | Decide whether deeper investigation is required |
-| AI agent | Orchestrate the investigation and select relevant tools |
+| AI agent | Orchestrate the investigation and collect evidence |
 | Tools | Retrieve operational evidence |
 | RAG | Retrieve documented procedures and operational knowledge |
 | LLM | Explain evidence and generate the briefing |
-| Dashboard | Present risk, evidence, impact and recommendations |
+| Dashboard | Present risk, evidence, and recommendations |
 | Human operator | Make the final operational decision |
 
----
-
-## 5.2 Detailed Architecture
-
-~~~mermaid
-flowchart TB
-
-    USER["Operations User"]
-    UI["React Dashboard"]
-    API["FastAPI Backend"]
-
-    DATA["DataCo Supply-Chain Dataset"]
-    FEATURES["Feature Engineering / Preprocessing"]
-    ML["XGBoost Risk Model"]
-    RISK["Risk Gate<br/>LOW / MEDIUM / HIGH"]
-
-    AGENT["Supply-Chain AI Agent"]
-
-    SHIPMENT["Shipment Tool<br/>get_shipment_status()"]
-    WEATHER["Weather Tool<br/>get_weather()"]
-    SUPPLIER["Supplier Tool<br/>find_alternative_supplier()"]
-
-    SHIPDATA["DataCo Test Data"]
-    WEATHERDATA["Open-Meteo<br/>Historical Weather"]
-    SUPPLIERDATA["Synthetic Supplier Intelligence"]
-
-    EVIDENCE["Investigation Evidence"]
-
-    KB["Operational Knowledge Base<br/>SOPs / Policies / Procedures / Playbooks"]
-    VECTOR["Vector Store"]
-    RAG["RAG Retrieval"]
-
-    LLM["LLM"]
-    BRIEF["Disruption Briefing"]
-    HUMAN["Human Operational Decision"]
-
-    USER --> UI
-    UI --> API
-
-    API --> DATA
-    DATA --> FEATURES
-    FEATURES --> ML
-    ML --> RISK
-
-    RISK -->|LOW| UI
-    RISK -->|MEDIUM / HIGH| AGENT
-
-    AGENT --> SHIPMENT
-    AGENT --> WEATHER
-    AGENT --> SUPPLIER
-
-    SHIPMENT --> SHIPDATA
-    WEATHER --> WEATHERDATA
-    SUPPLIER --> SUPPLIERDATA
-
-    SHIPMENT --> EVIDENCE
-    WEATHER --> EVIDENCE
-    SUPPLIER --> EVIDENCE
-
-    EVIDENCE --> AGENT
-    AGENT --> RAG
-
-    KB --> VECTOR
-    VECTOR --> RAG
-
-    RAG --> LLM
-    AGENT --> LLM
-    ML --> LLM
-
-    LLM --> BRIEF
-    BRIEF --> API
-    API --> UI
-    UI --> HUMAN
-~~~
-
-### Important Design Rule
-
-The system does **not** call every tool for every shipment.
-
-~~~text
-Every shipment
-      ↓
-ML risk prediction
-      ↓
-Risk gate
-      │
-      ├── LOW → monitor / no full investigation
-      │
-      └── MEDIUM/HIGH → AI agent
-                              ↓
-                     Select relevant tools
-                              ↓
-                     Collect evidence
-                              ↓
-                       Retrieve RAG
-                              ↓
-                         LLM briefing
-~~~
-
-### MVP Data Sources
+### Data Sources
 
 | Component | Source | Purpose |
 | --- | --- | --- |
-| Shipment Tool | DataCo test-period data | Shipment/order information |
-| Weather Tool | Open-Meteo historical data | Weather for destination/date |
-| Supplier Tool | Synthetic supplier dataset | Supplier risk and alternatives |
+| Shipment Tool | DataCo test-period data (`shipment_tool_data.csv`) | Shipment/order information |
 | ML Model | DataCo training data | Delay-risk prediction |
-| RAG | Project/SOP/procedure documents | Operational knowledge |
+| Weather Tool | Open-Meteo historical archive | Weather at the destination for the transit window |
+| Inventory Tool | Synthetic inventory dataset (`inventory_tool_data.csv`) | Product-level stock record |
+| Supplier Tool | Synthetic supplier dataset (`supplier_tool_data.csv`) | Alternative supplier candidates |
+| RAG | Five demonstration procedure documents (`rag/documents/`) | Operational knowledge |
 
-**Important:** the supplier intelligence dataset is synthetic for the MVP and must be labelled as synthetic. DataCo outcome fields such as Late_delivery_risk, Delivery Status, Days for shipping (real), and post-outcome shipping dates are not ML input features.
-
-
-# 6. Architecture Components
-
-## 6.1 React Frontend
-
-The frontend provides the operations control tower.
-
-It should display:
-
-* Shipment risk level
-* Delay probability
-* Shipment details
-* Investigation status
-* Tool evidence
-* Business impact
-* Recommended actions
-* Generated disruption briefings
+**Important:** the inventory and supplier datasets and the procedure documents are synthetic, created for this MVP. They are not real company records or policies. DataCo outcome fields such as `Late_delivery_risk`, `Delivery Status`, `Days for shipping (real)`, and post-outcome shipping dates are not ML input features.
 
 ---
 
-## 6.2 FastAPI Backend
+# 7. API
 
-FastAPI acts as the main application/API layer.
+The backend exposes these endpoints. Interactive documentation is available at `/docs` when the backend is running.
 
-Responsibilities include:
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `GET` | `/api/shipments/{shipment_reference}` | Shipment record, for example `SHP-153444` |
+| `POST` | `/api/predictions/evaluate/{shipment_id}` | Delay probability, risk level, and gate decision |
+| `POST` | `/api/agent/investigate/{shipment_id}` | Run the investigation and return the briefing |
+| `GET` | `/api/agent/investigate/{shipment_id}/stream` | Same investigation, streamed as Server-Sent Events |
+| `GET` | `/api/inventory/shipment/{shipment_reference}` | Product-level inventory record for the shipment's product |
+| `POST` | `/api/briefing/generate` | Generate a briefing from supplied evidence |
 
-* API endpoints
-* Request validation
-* ML inference
-* Shipment data retrieval
-* Communication with the AI agent
-* RAG retrieval
-* Briefing generation
-* Response formatting
+The stream emits `tool_start`, `tool_complete`, `tool_error`, `message`, and `done` events, or a single `error` event if the investigation cannot be completed.
 
----
+The investigation response contains the shipment reference, risk level, delay probability, `evidence` (one summary per evidence source), `rag_policy_citations`, `summary`, `recommended_actions`, `tool_trace`, and `limitations`.
 
-## 6.3 AI Agent
-
-The AI agent is the **investigation orchestrator**.
-
-It is not the ML model and it is not the source of shipment facts.
-
-Its responsibility is to determine:
-
-> **What information do we need to investigate this risky shipment, and which tools should be called?**
-
-Example:
-
-~~~text
-Shipment SHP001
-Delay Probability = HIGH
-        ↓
-     AI Agent
-        │
-        ├── get_shipment_status()
-        ├── get_weather()
-        └── find_alternative_supplier()
-        │
-        ▼
-Investigation Evidence
-        │
-        ▼
-       RAG
-        │
-        ▼
-       LLM
-        │
-        ▼
-Disruption Briefing
-~~~
-
-The agent should call only the tools relevant to the investigation.
+Investigating a LOW-risk shipment returns `400` with the reason; an unknown shipment returns `404`.
 
 ---
-
-## 6.4 Tool Layer
-
-The project exposes operational capabilities as tools.
-
-### Shipment Tool
-
-~~~python
-get_shipment_status(shipment_id)
-~~~
-
-**MVP source:** DataCo test-period data.
-
-Returns shipment/order information required for investigation, such as:
-
-* Shipment reference
-* Product/category
-* Destination
-* Shipping mode
-* Scheduled shipping information
-* Relevant planning attributes
-
-Post-outcome leakage fields are excluded from ML prediction inputs.
-
-### Weather Tool
-
-~~~python
-get_weather(location, date)
-~~~
-
-**MVP source:** Open-Meteo historical weather data.
-
-Returns:
-
-* Temperature
-* Precipitation
-* Wind conditions
-* Weather risk indicator
-
-### Supplier Tool
-
-~~~python
-find_alternative_supplier(product_category, destination)
-~~~
-
-**MVP source:** Synthetic supplier intelligence dataset.
-
-Returns:
-
-* Candidate suppliers
-* Supplier performance indicators
-* Lead-time information
-* Capacity/risk indicators
-* Alternative supplier options
-
-The supplier dataset is explicitly synthetic for the MVP.
-
-### Optional Inventory Tool
-
-~~~python
-get_inventory_status(product_id, warehouse_id)
-~~~
-
-Inventory is an optional enrichment layer. It should only be enabled when a defined inventory dataset is available; it is not assumed to exist in the DataCo dataset.
-
----
-
-## 6.5 Risk Gate
-
-The risk gate prevents unnecessary investigation.
-
-~~~text
-Delay Probability
-       ↓
-   RISK GATE
-   ┌────┴────┐
-   ↓         ↓
-  LOW     MEDIUM/HIGH
-   ↓         ↓
-MONITOR   INVESTIGATE
-~~~
-
-The exact thresholds will be validated during model development.
-
----
-
-## 6.6 RAG Layer
-
-RAG provides documented operational knowledge.
-
-Examples include:
-
-* SOPs
-* Supplier procedures
-* Escalation policies
-* Logistics procedures
-* Disruption response playbooks
-
-RAG answers questions such as:
-
-> What does the documented procedure say we should do?
-
-RAG does not replace the operational tools. Tools provide shipment/weather/supplier evidence; RAG provides documented knowledge.
-
----
-
-## 6.7 LLM Layer
-
-The LLM converts the structured evidence into operational language.
-
-Inputs may include:
-
-* ML risk probability and risk level
-* Shipment information
-* Tool outputs
-* Business-impact information
-* Retrieved RAG context
-
-Outputs include:
-
-* Risk explanation
-* Investigation summary
-* Potential causes
-* Recommended actions
-* Disruption briefing
-
-The LLM should not invent evidence or procedures. Its output should be grounded in the ML result, tool evidence and retrieved knowledge.
-
-# 7. End-to-End Workflow
-
-The system follows a **predict → gate → investigate → explain → decide** workflow.
-
-~~~text
-SHIPMENT DATA
-      ↓
-FEATURE ENGINEERING
-      ↓
-XGBOOST ML MODEL
-      ↓
-DELAY PROBABILITY
-      ↓
-RISK GATE
-      │
-      ├──────── LOW ─────────► MONITOR
-      │
-      └──── MEDIUM / HIGH
-                    ↓
-                AI AGENT
-                    │
-          ┌─────────┼─────────┐
-          ▼         ▼         ▼
-       SHIPMENT   WEATHER   SUPPLIER
-          │         │         │
-          └─────────┼─────────┘
-                    ↓
-          INVESTIGATION EVIDENCE
-                    ↓
-                   RAG
-                    ↓
-                   LLM
-                    ↓
-          DISRUPTION BRIEFING
-                    ↓
-          OPERATIONS DASHBOARD
-                    ↓
-             HUMAN DECISION
-~~~
-
-### Step 1 — Predict
-
-The ML model evaluates the shipment using information available at the prediction point and produces a delay probability.
-
-### Step 2 — Gate
-
-The risk gate determines whether the shipment requires deeper investigation.
-
-### Step 3 — Investigate
-
-For medium/high-risk shipments, the agent selects the tools relevant to the investigation. It does not automatically call every tool.
-
-### Step 4 — Retrieve Knowledge
-
-RAG retrieves the relevant SOPs, escalation procedures, supplier policies or disruption playbooks.
-
-### Step 5 — Explain
-
-The LLM combines the ML result, tool evidence, business-impact information and retrieved knowledge into an operational briefing.
-
-### Step 6 — Decide
-
-The operations team reviews the briefing and makes the final decision.
-
-> **ML predicts. The agent investigates. Tools provide evidence. RAG provides knowledge. The LLM communicates. Humans decide.**
 
 # 8. Machine Learning Layer
 
-## Objective
-
-The ML component predicts the probability that a shipment will experience a delay or disruption.
-
-### Potential Target
-
-```text
-Delayed
-```
-
-Example:
+The ML component predicts the probability that a shipment will be delayed.
 
 ```text
 0 = On Time
 1 = Delayed
 ```
 
-The model may also produce a probability:
+The probability is translated into a risk level using two configurable thresholds:
 
 ```text
-Delay Probability = 0.87
+0.00 - 0.39 → LOW      (not investigated)
+0.40 - 0.69 → MEDIUM   (investigated)
+0.70 - 1.00 → HIGH     (investigated)
 ```
 
-Which can be translated into:
+The thresholds are set by `RISK_THRESHOLD` (default `0.40`) and `HIGH_RISK_THRESHOLD` (default `0.70`).
 
-```text
-0.00 - 0.39 → LOW
-0.40 - 0.69 → MEDIUM
-0.70 - 1.00 → HIGH
-```
+The model is an XGBoost classifier with a scikit-learn preprocessor, stored in `models/`. Training and evaluation are documented in the notebooks in `notebooks/`. The model was trained and evaluated on a chronological split of the DataCo data, so it is evaluated on orders placed after the ones it was trained on.
 
-Thresholds will be validated during model development.
+For supply-chain disruption detection, particular attention is paid to **false negatives**, because failing to identify a genuinely risky shipment may have significant operational consequences.
 
 ---
 
-## Potential Features
+# 9. RAG and Briefing Layer
+
+The briefing is produced after the evidence has been collected.
 
 ```text
-supplier_delay_rate
-historical_transit_time
-current_transit_time
-distance_remaining
-days_to_expected_arrival
-weather_severity
-route_risk
-supplier_reliability
-port_congestion
-inventory_days
-shipment_priority
-```
-
----
-
-## Model Development
-
-The initial approach should include a baseline model and at least one stronger tree-based model.
-
-Potential models:
-
-```text
-Logistic Regression
+Collected evidence
         ↓
-Random Forest
+Retrieve supporting documents (Chroma vector store + Azure OpenAI embeddings)
         ↓
-XGBoost / Gradient Boosting
+Generate briefing (Azure OpenAI)
+        ↓
+Summary + recommended actions + citations
 ```
 
-Models will be evaluated using appropriate classification metrics, including:
+Retrieval and the language model are both **optional**. The briefing is always generated:
 
-* Precision
-* Recall
-* F1 Score
-* ROC-AUC
-* Confusion Matrix
+| Situation | Briefing text | Citations |
+| --- | --- | --- |
+| Documents retrieved and Azure OpenAI available | Written by Azure OpenAI from the evidence and retrieved guidance | Sources of the retrieved documents |
+| Documents retrieved, Azure OpenAI unavailable | Assembled directly from the evidence and retrieved guidance | Sources of the retrieved documents |
+| Retrieval unavailable (no Azure configuration, no vector store, or a failed search) | Assembled directly from the collected evidence | None |
+| Retrieval returns nothing usable | Assembled directly from the collected evidence | None |
 
-For supply-chain disruption detection, particular attention should be paid to **false negatives**, because failing to identify a genuinely risky shipment may have significant operational consequences.
+Citations are only ever the sources of documents that were actually retrieved. When none were retrieved, the citation list is empty and the briefing's `limitations` state that supporting document retrieval was unavailable.
 
----
+The knowledge base consists of five procedure documents in `rag/documents/`, covering shipment delay escalation, weather disruption, alternative suppliers, inventory stockout response, and transport rerouting. A persisted vector store built from them is included in `rag/vector_store/`.
 
-# 9. AI Agent Layer
+To rebuild the vector store after changing the documents (requires the Azure OpenAI embedding configuration):
 
-The agent is responsible for deciding:
-
-> **What information do I need to investigate this disruption?**
-
-### Example
-
-```text
-User:
-"Investigate shipment SHP001."
-
-Agent
-│
-├── get_shipment_status()
-│
-├── get_weather()
-│
-├── get_supplier_information()
-│
-├── get_inventory_status()
-│
-├── run_risk_prediction()
-│
-├── search_knowledge_base()
-│
-└── generate_briefing()
-```
-
-The agent should provide traceable reasoning through **tool outputs and retrieved evidence**, rather than relying on unsupported assumptions.
-
----
-
-# 10. RAG Layer
-
-The RAG system provides the agent/LLM with domain-specific knowledge.
-
-## Knowledge Base
-
-Potential documents include:
-
-```text
-SOPs
-Supplier procedures
-Procurement policies
-Logistics procedures
-Escalation procedures
-Inventory policies
-Disruption response procedures
-Supplier profiles
-```
-
-### RAG Pipeline
-
-```text
-Documents
-    ↓
-Document Loading
-    ↓
-Text Extraction
-    ↓
-Chunking
-    ↓
-Embeddings
-    ↓
-Vector Database
-    ↓
-Similarity Search
-    ↓
-Relevant Context
-    ↓
-LLM
-```
-
-The purpose of RAG is to ground recommendations in available operational knowledge rather than allowing the LLM to invent procedures.
-
----
-
-# 11. LLM Layer
-
-The LLM is responsible primarily for:
-
-* Explaining risk
-* Summarizing investigation results
-* Translating technical outputs into operational language
-* Generating disruption briefings
-* Presenting recommendations clearly
-
-The LLM should **not replace the ML risk model**.
-
-The intended architecture is:
-
-```text
-ML Model
-   ↓
-Risk Prediction
-   ↓
-AI Agent
-   ↓
-Investigation
-   ↓
-RAG + Tools
-   ↓
-LLM
-   ↓
-Human-readable briefing
+```bash
+python -m rag.ingestion
 ```
 
 ---
 
-# 12. Business Impact Assessment
+# 10. Technology Stack
 
-A key principle of the project is:
-
-> **Risk is not the same as business impact.**
-
-For example:
-
-```text
-Shipment A
-Delay Probability = 90%
-Inventory Coverage = 60 days
-```
-
-The delay may have limited immediate operational impact.
-
-While:
-
-```text
-Shipment B
-Delay Probability = 55%
-Inventory Coverage = 2 days
-```
-
-could represent a more urgent situation.
-
-Therefore, the system should consider both:
-
-```text
-Delay Risk
-     +
-Inventory Exposure
-     +
-Shipment Criticality
-     ↓
-Disruption Priority
-```
-
-The final implementation may use a transparent business-rule score rather than a separate ML model.
+| Layer            | Technology                                   |
+| ---------------- | -------------------------------------------- |
+| Frontend         | React 18, Vite                               |
+| Backend          | FastAPI, Python                              |
+| Machine Learning | scikit-learn, XGBoost                        |
+| AI Agent         | LangGraph                                    |
+| LLM              | Azure OpenAI                                 |
+| RAG              | LangChain, Chroma, Azure OpenAI embeddings   |
+| Data Processing  | Pandas, NumPy                                |
+| Weather          | Open-Meteo (no API key required)             |
+| Packaging        | uv (`pyproject.toml`, `uv.lock`), `requirements.txt` |
+| Testing          | Pytest (backend), Node test runner (frontend) |
+| Version Control  | Git / GitHub                                 |
 
 ---
 
-# 13. Data Architecture
-
-The project will combine multiple data sources.
+# 11. Repository Structure
 
 ```text
-                  DATA SOURCES
-                       │
-       ┌───────────────┼────────────────┐
-       │               │                │
-       ▼               ▼                ▼
-   Shipment         Inventory        Supplier
-     Data              Data            Data
-       │               │                │
-       └───────────────┼────────────────┘
-                       │
-                       ▼
-                Data Processing
-                       │
-                       ▼
-              Feature Engineering
-                       │
-                       ▼
-                 ML Data Layer
-                       │
-                       ▼
-               Risk Prediction
-```
-
-External signals:
-
-```text
-Weather APIs
-News / disruption signals
-Public logistics datasets
-Shipping datasets
-```
-
----
-
-# 14. Technology Stack
-
-| Layer            | Technology                     |
-| ---------------- | ------------------------------ |
-| Frontend         | React                          |
-| Backend          | FastAPI / Python               |
-| Programming      | Python / JavaScript            |
-| Machine Learning | Scikit-learn / XGBoost         |
-| AI Agent         | Agent framework / tool calling |
-| LLM              | Azure/OpenAI-compatible LLM    |
-| RAG              | Embeddings + Vector Database   |
-| Data Processing  | Pandas / NumPy                 |
-| APIs             | REST                           |
-| Cloud            | Microsoft Azure                |
-| Version Control  | Git / GitHub                   |
-| Documentation    | Markdown                       |
-| Testing          | Pytest / API testing           |
-
-Specific Azure services will be finalized during implementation based on project requirements, free-credit constraints, and deployment architecture.
-
----
-
-# 15. Repository Structure
-
-The repository should follow a modular structure:
-
-```text
-supply-chain-disruption-agent/
-│
+.
 ├── README.md
-├── .gitignore
-├── .env.example
-├── requirements.txt
-├── docker-compose.yml
-├── Dockerfile
-│
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── external/
-│
-├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_feature_engineering.ipynb
-│   ├── 03_model_training.ipynb
-│   └── 04_model_evaluation.ipynb
+├── pyproject.toml              # Python project and dependencies
+├── uv.lock                     # Locked dependency versions
+├── requirements.txt            # Dependencies for pip-based installs
+├── .env.example                # Backend environment variables
+├── startup.sh                  # Starts the backend with uvicorn
 │
 ├── backend/
-│   ├── main.py
+│   ├── main.py                 # FastAPI application
+│   ├── config.py               # Settings loaded from the environment
+│   ├── exceptions.py
 │   ├── api/
 │   │   ├── routes_shipments.py
 │   │   ├── routes_predictions.py
-│   │   ├── routes_agent.py
+│   │   ├── routes_agent.py     # Investigation and streaming endpoints
+│   │   ├── routes_inventory.py
 │   │   └── routes_briefing.py
-│   │
 │   ├── models/
-│   │   ├── schemas.py
-│   │   └── database_models.py
-│   │
-│   ├── services/
-│   │   ├── shipment_service.py
-│   │   ├── weather_service.py
-│   │   ├── supplier_service.py
-│   │   └── inventory_service.py
-│   │
-│   └── config.py
-│
-├── agent/
-│   ├── agent.py
-│   ├── tools/
-│   │   ├── shipment_tool.py
-│   │   ├── weather_tool.py
-│   │   ├── supplier_tool.py
-│   │   └── inventory_tool.py
-│   │
-│   └── prompts/
-│       └── system_prompt.txt
-│
-├── ml/
-│   ├── preprocessing.py
-│   ├── features.py
-│   ├── train.py
-│   ├── predict.py
-│   ├── evaluate.py
-│   └── artifacts/
+│   │   └── schemas.py          # Request and response schemas
+│   └── services/
+│       ├── agent_service.py        # LangGraph investigation workflow
+│       ├── agent_tools.py          # Tools the agent calls
+│       ├── prediction_service.py   # ML inference and risk gate
+│       ├── model_feature_service.py
+│       ├── shipment_service.py
+│       ├── weather_service.py
+│       ├── inventory_service.py
+│       ├── supplier_service.py
+│       ├── briefing_service.py     # Retrieval, briefing, and fallback
+│       └── azure_openai_service.py
 │
 ├── rag/
-│   ├── ingestion.py
-│   ├── chunking.py
-│   ├── embeddings.py
+│   ├── config.py
+│   ├── ingestion.py            # Builds the vector store
 │   ├── retrieval.py
-│   └── documents/
+│   ├── documents/              # Five procedure documents (PDF)
+│   └── vector_store/           # Persisted Chroma store
+│
+├── data/
+│   └── processed/              # Shipment, inventory, and supplier datasets
+│
+├── models/                     # Trained preprocessor and XGBoost model
+├── notebooks/                  # Model development and data preparation
 │
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   └── App.jsx
 │   ├── package.json
-│   └── README.md
+│   ├── vite.config.js
+│   ├── .env.example
+│   └── src/
+│       ├── App.jsx
+│       ├── api/                # Backend client and investigation stream
+│       └── components/         # Home, Shipments, Investigation, Briefings, Actions
 │
-├── tests/
-│   ├── test_api.py
-│   ├── test_ml.py
-│   ├── test_tools.py
-│   ├── test_agent.py
-│   └── test_rag.py
-│
-├── docs/
-│   ├── architecture/
-│   ├── api/
-│   └── demo/
-│
-└── deployment/
-    ├── azure/
-    └── docker/
-```
-
-The structure can evolve as implementation progresses.
-
----
-
-# 16. Development Roadmap
-
-## Week 5 — Foundation & ML
-
-### Objectives
-
-Build the data and prediction foundation.
-
-### Deliverables
-
-* [ ] Identify datasets
-* [ ] Define data schema
-* [ ] Clean datasets
-* [ ] Integrate shipment/inventory/supplier data
-* [ ] Engineer ML features
-* [ ] Build baseline model
-* [ ] Train improved model
-* [ ] Evaluate model
-* [ ] Save trained model
-* [ ] Create prediction API
-* [ ] Define agent tools
-
-### Week 5 Target
-
-The team should be able to provide:
-
-```text
-Shipment ID
-       ↓
-ML Model
-       ↓
-Delay Probability
-       ↓
-Risk Classification
+├── tests/                      # Backend tests (pytest)
+└── docs/                       # Product and planning documents
 ```
 
 ---
 
-# Week 6 — Agent + RAG
+# 12. Getting Started
 
-### Objectives
+## 12.1 Prerequisites
 
-Turn the prediction system into an intelligent investigation system.
+* Python 3.11 (the project declares `>=3.11,<3.13`; it has been run and tested on 3.11)
+* Node.js and npm, for the frontend
+* [uv](https://docs.astral.sh/uv/) (recommended) or pip
+* Internet access for the weather step (Open-Meteo). Without it the investigation still completes and reports the missing weather evidence.
 
-### Deliverables
+Azure OpenAI credentials are **not** required to run the application locally.
 
-* [ ] Implement shipment tool
-* [ ] Implement weather tool
-* [ ] Implement supplier tool
-* [ ] Implement inventory tool
-* [ ] Connect ML model to agent
-* [ ] Build knowledge base
-* [ ] Implement document ingestion
-* [ ] Implement embeddings
-* [ ] Implement vector search
-* [ ] Implement RAG
-* [ ] Build agent workflow
-* [ ] Generate explanations
-
-### Week 6 Target
-
-The agent should be able to:
-
-```text
-Identify Risk
-     ↓
-Investigate Cause
-     ↓
-Retrieve Relevant Knowledge
-     ↓
-Explain Findings
-```
-
----
-
-# Week 7 — Product + Azure + Demo
-
-### Objectives
-
-Turn the technical components into a working product.
-
-### Deliverables
-
-* [ ] Build React dashboard
-* [ ] Connect frontend to FastAPI
-* [ ] Connect agent to frontend
-* [ ] Add risk visualization
-* [ ] Add shipment investigation screen
-* [ ] Add recommendations
-* [ ] Add briefing generation
-* [ ] Deploy application to Azure
-* [ ] Test production environment
-* [ ] Fix integration issues
-* [ ] Prepare Demo Day presentation
-* [ ] Prepare technical documentation
-
-### Week 7 Target
-
-A user should be able to open the application and:
-
-```text
-View shipments
-      ↓
-Identify high-risk shipment
-      ↓
-Investigate shipment
-      ↓
-Understand why it is at risk
-      ↓
-View possible alternatives
-      ↓
-Generate disruption briefing
-```
-
----
-
-# 17. Team Responsibilities
-
-Team members should own specific components while collaborating across interfaces.
-
-| Area             | Primary Responsibility                          |
-| ---------------- | ----------------------------------------------- |
-| Project Lead     | Architecture, coordination, integration         |
-| Data Engineering | Data collection, cleaning, integration          |
-| ML Engineering   | Feature engineering, model training, evaluation |
-| AI Engineering   | Agent, tool calling, orchestration              |
-| RAG / LLM        | Knowledge base, retrieval, prompts, briefing    |
-| Frontend         | React dashboard and UX                          |
-| Cloud / DevOps   | Azure deployment and infrastructure             |
-
-> Responsibilities can overlap depending on team size.
-
----
-
-# 18. Getting Started
-
-## 18.1 Clone the repository
+## 12.2 Clone the repository
 
 ```bash
-git clone <REPOSITORY_URL>
-cd supply-chain-disruption-agent
+git clone https://github.com/tag-ecosystemai/c1-transformers-project-3.git
+cd c1-transformers-project-3
 ```
 
-## 18.2 Create a virtual environment
+## 12.3 Install backend dependencies
+
+With uv:
+
+```bash
+uv sync
+```
+
+Or with pip:
 
 ```bash
 python -m venv .venv
 ```
 
-### Windows
+Activate it — Windows:
 
 ```bash
 .venv\Scripts\activate
 ```
 
-### macOS / Linux
+macOS / Linux:
 
 ```bash
 source .venv/bin/activate
 ```
 
----
-
-## 18.3 Install dependencies
+Then:
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+## 12.4 Configure environment variables
 
-## 18.4 Configure environment variables
+Copy `.env.example` to `.env`.
 
-Copy:
-
-```bash
-.env.example
-```
-
-to:
-
-```bash
-.env
-```
-
-Then configure the required API keys and service credentials.
+The defaults are enough to run locally with the fallback briefing. Add the Azure OpenAI values only if you want retrieved documents and model-written briefings; see [section 13](#13-environment-variables).
 
 **Never commit `.env` to GitHub.**
 
----
+## 12.5 Start the backend
 
-## 18.5 Start the backend
+From the repository root:
 
 ```bash
 uvicorn backend.main:app --reload
 ```
 
-The API should then be available locally.
+With uv:
 
----
+```bash
+uv run uvicorn backend.main:app --reload
+```
 
-## 18.6 Start the frontend
+The API is then available at `http://localhost:8000`, with interactive documentation at `http://localhost:8000/docs`.
+
+## 12.6 Start the frontend
 
 ```bash
 cd frontend
@@ -1250,74 +478,142 @@ npm install
 npm run dev
 ```
 
+Open `http://localhost:5173`. In development, Vite proxies `/api` requests to the backend at `http://localhost:8000`, so `VITE_API_BASE_URL` can stay empty.
+
+## 12.7 Try it
+
+The dashboard loads two demonstration shipments by default:
+
+* **`SHP-153444`** — MEDIUM risk. Investigating it runs all six evidence steps and produces a briefing.
+* **`SHP-153440`** — LOW risk. The risk gate reports that no investigation is required.
+
+Without Azure OpenAI configuration, the briefing for `SHP-153444` is generated from the collected evidence, shows no document citations, and states that supporting documents were unavailable.
+
 ---
 
-# 19. Environment Variables
+# 13. Environment Variables
 
-Example:
+All backend variables are listed in `.env.example`. Every variable has a working default except the Azure OpenAI values.
 
-```env
-# Application
-ENVIRONMENT=development
+### Needed for the local fallback
 
-# LLM
-LLM_API_KEY=
-LLM_ENDPOINT=
-LLM_MODEL=
+Nothing beyond the defaults. The data paths, model paths, thresholds, and weather URLs in `.env.example` work as they are.
 
-# Weather
-WEATHER_API_KEY=
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FRONTEND_URL` | `http://localhost:3000, http://localhost:5173` | Origins allowed to call the API (comma-separated) |
+| `SHIPMENT_DATA_PATH` | `data/processed/shipment_tool_data.csv` | Shipment dataset |
+| `INVENTORY_DATA_PATH` | `data/processed/inventory_tool_data.csv` | Inventory dataset |
+| `SUPPLIER_DATA_PATH` | `data/processed/supplier_tool_data.csv` | Supplier dataset |
+| `MODEL_PATH`, `PREPROCESSOR_PATH` | `models/…` | Trained model artifacts |
+| `RISK_THRESHOLD` | `0.40` | Probability at which a shipment is investigated |
+| `HIGH_RISK_THRESHOLD` | `0.70` | Probability at which risk is HIGH |
+| `WEATHER_API_BASE_URL`, `WEATHER_GEOCODING_URL` | Open-Meteo URLs | Weather and geocoding services |
+| `WEATHER_TIMEOUT_SECONDS` | `10` | Weather request timeout |
 
-# Database
-DATABASE_URL=
+### Optional: Azure OpenAI and RAG
 
-# Vector Database
-VECTOR_DB_URL=
-VECTOR_DB_API_KEY=
+Set these to enable document retrieval and model-written briefings. If they are missing, the application uses the fallback described in [section 9](#9-rag-and-briefing-layer).
 
-# Azure
-AZURE_SUBSCRIPTION_ID=
-AZURE_RESOURCE_GROUP=
-AZURE_REGION=
+| Variable | Purpose |
+| --- | --- |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI key |
+| `AZURE_OPENAI_API_VERSION` | API version (default `2024-02-01`) |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT` | Deployment used to write the briefing |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | Deployment used by RAG ingestion and retrieval |
+| `VECTOR_STORE_PATH` | Location of the vector store (default `rag/vector_store`) |
+| `RAG_COLLECTION_NAME` | Collection name (default `operational_sops`) |
+| `RAG_DOCUMENTS_PATH`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_TOP_K` | Ingestion and retrieval settings |
+
+### Frontend
+
+Listed in `frontend/.env.example`.
+
+| Variable | Purpose |
+| --- | --- |
+| `VITE_API_BASE_URL` | Backend URL. Leave empty for local development. |
+| `VITE_DEMO_SHIPMENTS` | Comma-separated shipment references shown on the dashboard |
+
+---
+
+# 14. Running the Tests
+
+## Backend
+
+From the repository root:
+
+```bash
+python -m pytest -m "not integration"
 ```
 
-Actual variables will depend on the services selected by the team.
+With uv:
+
+```bash
+uv run pytest -m "not integration"
+```
+
+These tests run offline: weather, retrieval, and Azure OpenAI are replaced with fixed test data.
+
+Two tests are marked `integration` and call the real retrieval pipeline. They need the Azure OpenAI embedding configuration:
+
+```bash
+python -m pytest -m integration
+```
+
+## Frontend
+
+```bash
+cd frontend
+npm test
+```
+
+The frontend tests use Node's built-in test runner and do not need the backend.
+
+To check the production build:
+
+```bash
+npm run build
+```
 
 ---
 
-# 20. Development Principles
+# 15. Important Limitations
 
-## 20.1 Data Before AI
+The application is a demonstration built on historical and synthetic data. It reports these limits itself, in the `limitations` of every briefing.
 
-Ensure the underlying data is reliable before adding advanced AI functionality.
+* **Inventory is product-level.** The inventory record is matched to a shipment by product name only. It describes the product, not the shipment: it does **not** verify that stock is available for a specific shipment or at its destination. No warehouse is linked to a shipment.
+* **Supplier candidates are recommendations, not verified commitments.** Candidates are matched on product category. Supplier availability, capacity for the required quantity, commercial terms, and delivery dates are not verified. Human approval is required before changing suppliers.
+* **Briefings may have no citations.** When supporting document retrieval is unavailable, the briefing is still generated from the collected evidence, without document citations, and says so.
+* **Inventory and supplier data are synthetic**, as are the procedure documents used for RAG. They are not real company records or policies.
+* **Weather is destination-level and historical.** It describes the destination city over an approximate window (order date plus scheduled shipping days), not the full shipment route.
+* **Delay probability is not delay duration.** The model estimates the likelihood of a delay, not how many days late a shipment will be.
+* **Shipments come from a historical dataset** (DataCo), not live tracking.
 
----
-
-## 20.2 ML Predicts — Agent Investigates
-
-The ML model should provide the risk prediction.
-
-The agent should determine how to investigate the prediction.
-
----
-
-## 20.3 RAG Grounds Knowledge
-
-The RAG system should provide relevant operational knowledge and procedures.
 
 ---
 
-## 20.4 LLM Explains
+# 16. Deployment Status
 
-The LLM should transform structured findings into understandable operational communication.
+**Live demo:** https://supply-chain-disruption-agent.vercel.app/
+
+The Supply-Chain Disruption Agent is deployed as a live application using Microsoft Azure and Vercel. The deployment was carried out by Fredrick.
+
+The repository includes `startup.sh`, which starts the backend with uvicorn on the port given by `PORT`, and the frontend reads the backend URL from `VITE_API_BASE_URL`.
 
 ---
 
-## 20.5 Human-in-the-Loop
+# 17. Development Principles
 
-The system provides recommendations and decision support.
+**Data before AI.** Ensure the underlying data is reliable before adding advanced AI functionality.
 
-Final operational decisions remain with human users.
+**ML predicts — the agent investigates.** The ML model provides the risk prediction. The agent collects the evidence around it.
+
+**RAG grounds knowledge.** Recommendations cite operational procedures only when those procedures were actually retrieved.
+
+**LLM explains.** The LLM turns structured findings into understandable operational communication. It does not replace the ML risk model and must not invent evidence or procedures.
+
+**Human-in-the-loop.** The system provides recommendations and decision support. Final operational decisions remain with human users.
 
 ```text
 AI
@@ -1333,173 +629,24 @@ Human
 Decide
 ```
 
----
+**Modular architecture.** ML, agent, tools, RAG, LLM, API, and frontend are independently testable.
 
-## 20.6 Modular Architecture
-
-Each component should be independently testable.
-
-```text
-ML
-Agent
-Tools
-RAG
-LLM
-API
-Frontend
-```
-
-should not become one tightly coupled application.
+**Reproducibility.** All team members should be able to reproduce the development environment and run the core application.
 
 ---
 
-## 20.7 Reproducibility
-
-All team members should be able to reproduce the development environment and run the core application.
-
----
-
-# 21. Expected Demo
-
-The final Demo Day should demonstrate a complete operational scenario.
-
-## Scenario
-
-A shipment is approaching its expected delivery date.
-
-The system detects a high probability of delay.
-
-### Step 1 — Dashboard
-
-```text
-12 HIGH-RISK SHIPMENTS
-```
-
-### Step 2 — Select Shipment
-
-```text
-SHP001
-
-Delay Probability: 87%
-Risk Level: HIGH
-```
-
-### Step 3 — Investigate
-
-The agent calls:
-
-```text
-get_shipment_status()
-get_weather()
-get_inventory_status()
-get_supplier_information()
-```
-
-### Step 4 — Identify Causes
-
-Example:
-
-```text
-Potential Causes
-
-• Severe weather
-• Supplier historical delays
-• Route congestion
-• Low inventory coverage
-```
-
-### Step 5 — Assess Impact
-
-```text
-Inventory Coverage: 3 days
-Expected Delay: 5 days
-
-Potential Stockout: YES
-```
-
-### Step 6 — Find Alternatives
-
-The agent calls:
-
-```text
-find_alternative_supplier()
-```
-
-### Step 7 — Retrieve Procedure
-
-RAG retrieves the relevant disruption/escalation procedure.
-
-### Step 8 — Generate Briefing
-
-The LLM produces:
-
-```text
-SUPPLY-CHAIN DISRUPTION BRIEFING
-
-Shipment: SHP001
-Risk: HIGH
-Delay Probability: 87%
-
-Primary Risk Factors:
-1. Weather
-2. Supplier performance
-3. Route congestion
-
-Business Impact:
-Inventory coverage may be insufficient
-to absorb the expected delay.
-
-Recommended Actions:
-1. Contact alternative supplier.
-2. Evaluate alternative route.
-3. Escalate shipment to operations.
-```
-
-This demonstrates the complete system rather than isolated technical components.
-
----
-
-# 22. Future Improvements
+# 18. Future Improvements
 
 Potential future enhancements include:
 
 * Real-time shipment tracking
-* More advanced time-series forecasting
-* Port congestion monitoring
+* Inventory linked to specific shipments and warehouses
+* Verified supplier availability and capacity
+* Route-level weather and port congestion monitoring
 * Real-time news analysis
-* Geospatial route risk
-* Supplier risk scoring
-* Automated alerts
-* Email/Teams notifications
+* Automated alerts and Email/Teams notifications
 * What-if simulation
-* Multi-agent architecture
-* Reinforcement learning for routing decisions
-* Automated procurement workflows
-* Advanced supply-chain digital twin
-* Continuous model monitoring
-* Model drift detection
-
-These features are outside the initial MVP unless the team completes the core system early.
-
----
-
-# 23. Team
-
-## Project
-
-**Logistics: Supply-Chain Disruption Agent**
-
-### Project Lead
-
-**[Team Lead Name]**
-
-### Team Members
-
-* [Member 1]
-* [Member 2]
-* [Member 3]
-* [Member 4]
-* [Member 5]
+* Continuous model monitoring and drift detection
 
 ---
 
@@ -1528,27 +675,5 @@ and what alternatives are available."
 ```
 
 The **Supply-Chain Disruption Agent** is designed to help operations teams identify potential disruptions earlier, understand their causes, and make better-informed decisions.
-
----
-
-## ⭐ Core Architecture Principle
-
-```text
-       DATA
-        ↓
-    ML PREDICTION
-        ↓
-   AI INVESTIGATION
-        ↓
-   TOOL CALLING
-        ↓
-       RAG
-        ↓
-       LLM
-        ↓
- ACTIONABLE BRIEFING
-        ↓
- HUMAN DECISION
-```
 
 **Detect → Investigate → Explain → Recommend → Decide**

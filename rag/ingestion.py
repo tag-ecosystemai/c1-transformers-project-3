@@ -1,25 +1,24 @@
-import os
-from dotenv import load_dotenv
+from pathlib import Path
 
-# Import specific loaders for narrative file types (No CSV or Excel)
-from langchain_community.document_loaders import (
-    TextLoader, 
-    PyPDFLoader, 
-    Docx2txtLoader
-)
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_community.document_loaders import (
+    Docx2txtLoader,
+    PyPDFLoader,
+    TextLoader,
+)
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain_text_splitters import (
+    RecursiveCharacterTextSplitter,
+)
 
-load_dotenv()
-# Deterministic paths based on the project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOCS_DIR = os.path.join(BASE_DIR, 'rag', 'documents')
+from rag.config import (
+    COLLECTION_NAME,
+    DOCUMENTS_DIRECTORY,
+    VECTOR_STORE_DIRECTORY,
+    get_azure_embedding_settings,
+)
 
-# Option A: Always use the project-relative default (No os.getenv needed)
-DB_DIR = os.path.join(BASE_DIR, 'rag', 'vector_store')
 
-# The Router: Strictly narrative formats for optimal RAG chunking
 LOADER_MAPPING = {
     ".md": TextLoader,
     ".txt": TextLoader,
@@ -27,55 +26,162 @@ LOADER_MAPPING = {
     ".docx": Docx2txtLoader,
 }
 
-def ingest_documents():
+
+def load_documents() -> list:
     """
-    Scans the documents directory, automatically detects narrative file types,
-    extracts the text, chunks it, and saves the embeddings to ChromaDB.
+    Load supported narrative documents from the RAG document folder.
     """
-    print(f"Scanning directory for documents: {DOCS_DIR}")
+    if not DOCUMENTS_DIRECTORY.exists():
+        raise FileNotFoundError(
+            "The RAG documents directory does not exist: "
+            f"{DOCUMENTS_DIRECTORY}"
+        )
+
     documents = []
-    
-    # Manually loop through all files in the directory
-    for root, _, files in os.walk(DOCS_DIR):
-        for file in files:
-            # Ignore hidden files like .gitkeep
-            if file.startswith("."):
-                continue
-                
-            file_ext = os.path.splitext(file)[1].lower()
-            file_path = os.path.join(root, file)
-            
-            # If the file type is in our mapping, load it
-            if file_ext in LOADER_MAPPING:
-                print(f"Loading {file}...")
-                loader_class = LOADER_MAPPING[file_ext]
-                loader = loader_class(file_path)
-                documents.extend(loader.load())
-            else:
-                print(f"Skipping {file}: Unsupported format for narrative RAG.")
-                
-    if not documents:
-        print("No valid documents found! Add .pdf, .docx, .txt, or .md files.")
-        return
 
-    # Chunk the compiled text from all supported files
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(documents)
-    
-    print(f"Successfully extracted and split text into {len(chunks)} chunks.")
+    for file_path in sorted(
+        DOCUMENTS_DIRECTORY.rglob("*")
+    ):
+        if not file_path.is_file():
+            continue
 
-    # Priority 2 Fix: Generate Azure OpenAI embeddings and save to database
-    print("Generating Azure OpenAI embeddings and saving to ChromaDB...")
-    embeddings = AzureOpenAIEmbeddings(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2023-05-15"),
-        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        if file_path.name.startswith("."):
+            continue
+
+        file_extension = file_path.suffix.lower()
+
+        if file_extension not in LOADER_MAPPING:
+            print(
+                f"Skipping {file_path.name}: "
+                "unsupported narrative format."
+            )
+            continue
+
+        print(f"Loading {file_path.name}...")
+
+        loader_class = LOADER_MAPPING[file_extension]
+
+        if file_extension in {".md", ".txt"}:
+            loader = loader_class(
+                str(file_path),
+                encoding="utf-8",
+            )
+        else:
+            loader = loader_class(str(file_path))
+
+        loaded_documents = loader.load()
+
+        for document in loaded_documents:
+            document.metadata["source"] = file_path.name
+            document.metadata["source_path"] = str(
+                file_path.relative_to(
+                    DOCUMENTS_DIRECTORY
+                )
+            )
+
+        documents.extend(loaded_documents)
+
+    return documents
+
+
+def create_embeddings() -> AzureOpenAIEmbeddings:
+    """
+    Create the Azure OpenAI embedding client.
+    """
+    embedding_settings = (
+        get_azure_embedding_settings()
     )
-    
-    Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=DB_DIR)
-    
-    print(f"Success! Vector database saved at: {DB_DIR}")
+
+    return AzureOpenAIEmbeddings(
+        **embedding_settings,
+    )
+
+
+def ingest_documents() -> dict:
+    """
+    Load operational documents, split them into chunks, generate
+    embeddings, and save them to the persistent Chroma collection.
+    """
+    print(
+        "Scanning RAG documents directory: "
+        f"{DOCUMENTS_DIRECTORY}"
+    )
+
+    documents = load_documents()
+
+    if not documents:
+        raise RuntimeError(
+            "No supported RAG documents were found. Add .md, .txt, "
+            ".pdf, or .docx files to the documents directory."
+        )
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        add_start_index=True,
+    )
+
+    chunks = text_splitter.split_documents(
+        documents
+    )
+
+    if not chunks:
+        raise RuntimeError(
+            "The documents were loaded, but no text chunks "
+            "were produced."
+        )
+
+    print(
+        f"Loaded {len(documents)} documents and created "
+        f"{len(chunks)} chunks."
+    )
+
+    embeddings = create_embeddings()
+
+    VECTOR_STORE_DIRECTORY.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    print(
+        "Generating embeddings and saving to: "
+        f"{VECTOR_STORE_DIRECTORY}"
+    )
+
+    vector_store = Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=str(
+            VECTOR_STORE_DIRECTORY
+        ),
+        collection_name=COLLECTION_NAME,
+        collection_metadata={
+            "description": (
+                "Synthetic operational knowledge for the "
+                "Supply-Chain Disruption Agent MVP"
+            )
+        },
+    )
+
+    result = {
+        "documents_loaded": len(documents),
+        "chunks_created": len(chunks),
+        "collection_name": COLLECTION_NAME,
+        "vector_store_path": str(
+            VECTOR_STORE_DIRECTORY
+        ),
+        "stored_chunks": (
+            vector_store._collection.count()
+        ),
+    }
+
+    print("RAG ingestion completed successfully.")
+
+    for key, value in result.items():
+        print(f"{key}: {value}")
+
+    return result
+
 
 if __name__ == "__main__":
     ingest_documents()

@@ -10,6 +10,8 @@ from backend.exceptions import WeatherServiceError
 from backend.models.schemas import DisruptionBriefingResponse
 from backend.services import agent_service
 from backend.services.agent_service import (
+    INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     iter_investigation,
@@ -28,14 +30,24 @@ EXPECTED_TOOLS = [
     "get_shipment",
     "get_historical_delay_context",
     "get_destination_weather",
+    "get_inventory_coverage",
+    "find_alternative_supplier",
 ]
 
+# The inventory and supplier steps run last, so the notes on what they
+# collected follow any failure and come before the notes that apply to
+# every briefing.
 STANDING_LIMITATIONS = [
+    INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
 
 TERMINAL_EVENTS = {"done", "error"}
+
+# The function behind each tool, where it is not named after the tool.
+TOOL_FUNCTIONS = {"find_alternative_supplier": "get_alternative_suppliers"}
 
 
 @pytest.fixture
@@ -209,7 +221,7 @@ def test_weather_failure_emits_tool_error_and_continues(
     name, done = events[-1]
     assert name == "done"
     assert done["evidence"]["weather_summary"] is None
-    assert done["tool_trace"][-1]["status"] == "error"
+    assert done["tool_trace"][3]["status"] == "error"
     assert done["limitations"] == [
         "Weather evidence was not collected: "
         "Open-Meteo did not respond within 10 seconds.",
@@ -233,7 +245,7 @@ def test_historical_context_failure_emits_tool_error_and_continues(
 
     events = stream(client)
 
-    # The failure is reported, then the weather tool still runs.
+    # The failure is reported, then the later tools still run.
     assert [
         (name, data["name"])
         for name, data in events
@@ -243,6 +255,10 @@ def test_historical_context_failure_emits_tool_error_and_continues(
         ("tool_error", "get_historical_delay_context"),
         ("tool_start", "get_destination_weather"),
         ("tool_complete", "get_destination_weather"),
+        ("tool_start", "get_inventory_coverage"),
+        ("tool_complete", "get_inventory_coverage"),
+        ("tool_start", "find_alternative_supplier"),
+        ("tool_complete", "find_alternative_supplier"),
     ]
 
     name, done = events[-1]
@@ -266,6 +282,8 @@ def test_low_risk_shipment_ends_with_not_required_error(
     monkeypatch,
 ):
     forbid(monkeypatch, "get_shipment")
+    forbid(monkeypatch, "get_inventory_coverage")
+    forbid(monkeypatch, "get_alternative_suppliers")
 
     events = stream(client)
 
@@ -329,6 +347,8 @@ def test_required_tool_failure_ends_stream_with_error(
     monkeypatch.setattr(agent_service, "get_shipment", broken_shipment)
     forbid(monkeypatch, "get_historical_delay_context")
     forbid(monkeypatch, "get_destination_weather")
+    forbid(monkeypatch, "get_inventory_coverage")
+    forbid(monkeypatch, "get_alternative_suppliers")
 
     events = stream(client)
 
@@ -361,7 +381,7 @@ def test_briefing_failure_ends_stream_with_error(
     events = stream(client)
 
     # Every tool succeeded, but without a briefing there is no done event.
-    assert names(events).count("tool_complete") == 4
+    assert names(events).count("tool_complete") == 6
     assert "tool_error" not in names(events)
     assert "done" not in names(events)
     assert events[-1][1]["status"] == 500
@@ -439,6 +459,119 @@ def test_abandoned_investigation_runs_no_further_tools(high_risk, monkeypatch):
 
     with pytest.raises(StopIteration):
         next(events)
+
+
+def record_tool_executions(monkeypatch, log: list) -> None:
+    """
+    Wrap every tool so that the moment it actually executes is appended
+    to the same log as the events the consumer receives.
+    """
+    for tool in EXPECTED_TOOLS:
+        function = TOOL_FUNCTIONS.get(tool, tool)
+        original = getattr(agent_service, function)
+
+        def recorded(*args, _tool=tool, _original=original, **kwargs):
+            log.append(("executes", _tool))
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(agent_service, function, recorded)
+
+
+def test_tool_start_is_received_before_the_tool_executes(
+    high_risk,
+    monkeypatch,
+):
+    log = []
+    record_tool_executions(monkeypatch, log)
+
+    for event in iter_investigation("SHP-153440"):
+        log.append((event.event, event.data.get("name")))
+
+    # Each tool runs only after its tool_start reached the consumer, and
+    # no tool runs ahead of the events that precede it.
+    expected = []
+    for tool in EXPECTED_TOOLS:
+        expected += [
+            ("tool_start", tool),
+            ("executes", tool),
+            ("tool_complete", tool),
+        ]
+    assert log[:-2] == expected
+    assert [name for name, _ in log[-2:]] == ["message", "done"]
+
+
+def test_consumer_stopping_after_first_event_runs_no_tool(
+    high_risk,
+    monkeypatch,
+):
+    log = []
+    record_tool_executions(monkeypatch, log)
+
+    events = iter_investigation("SHP-153440")
+    assert next(events).event == "tool_start"
+    events.close()
+
+    assert log == []
+
+
+def test_both_optional_failures_keep_order_and_match_synchronous_response(
+    client,
+    high_risk,
+    monkeypatch,
+):
+    def broken_context(shipment):
+        raise RuntimeError("context source unavailable")
+
+    def weather_unavailable(shipment):
+        raise WeatherServiceError("Open-Meteo request failed.")
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_historical_delay_context",
+        broken_context,
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "get_destination_weather",
+        weather_unavailable,
+    )
+
+    events = stream(client)
+    name, done = events[-1]
+
+    assert name == "done"
+    assert [
+        (name, data["name"])
+        for name, data in events
+        if name.startswith("tool_")
+    ][4:] == [
+        ("tool_start", "get_historical_delay_context"),
+        ("tool_error", "get_historical_delay_context"),
+        ("tool_start", "get_destination_weather"),
+        ("tool_error", "get_destination_weather"),
+        ("tool_start", "get_inventory_coverage"),
+        ("tool_complete", "get_inventory_coverage"),
+        ("tool_start", "find_alternative_supplier"),
+        ("tool_complete", "find_alternative_supplier"),
+    ]
+    assert [(call["tool"], call["status"]) for call in done["tool_trace"]] == [
+        ("get_delay_risk", "success"),
+        ("get_shipment", "success"),
+        ("get_historical_delay_context", "error"),
+        ("get_destination_weather", "error"),
+        ("get_inventory_coverage", "success"),
+        ("find_alternative_supplier", "success"),
+    ]
+    # Failures first, in the order the tools ran, then the standing notes.
+    assert done["limitations"] == [
+        "Historical delay context was not collected: "
+        "context source unavailable",
+        "Weather evidence was not collected: Open-Meteo request failed.",
+        *STANDING_LIMITATIONS,
+    ]
+    assert done["evidence"]["historical_delay_summary"] is None
+    assert done["evidence"]["weather_summary"] is None
+    assert done == client.post("/api/agent/investigate/SHP-153440").json()
 
 
 def test_synchronous_run_returns_the_streamed_briefing(high_risk):

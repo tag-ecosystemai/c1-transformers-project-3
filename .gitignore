@@ -81,10 +81,15 @@ htmlcov/
 # VECTOR DATABASES
 # ============================================================
 
-rag/vector_store/
-vector_store/
+# Ignore root-level vector stores, but keep the approved RAG store
+/vector_store/
 chroma_db/
 backend/chroma_db/
+
+# Keep the approved persisted RAG store required by the backend.
+!rag/vector_store/chroma.sqlite3
+!rag/vector_store/**/
+!rag/vector_store/**/*.bin
 
 
 # ============================================================
@@ -100,6 +105,9 @@ data/processed/*
 
 # Keep the approved Shipment Tool dataset
 !data/processed/shipment_tool_data.csv
+
+# Keep the synthetic Inventory Tool dataset
+!data/processed/inventory_tool_data.csv
 
 # Keep the existing processed project datasets
 !data/processed/df_model.zip
@@ -141,3 +149,4 @@ backend/temp/
 
 .DS_Store
 Thumbs.db
+

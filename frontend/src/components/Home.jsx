@@ -1,38 +1,351 @@
-import { RiskBadge, Meter, pct, money } from "./ui.jsx";
+import {
+  Meter,
+  RiskBadge,
+  StatusChip,
+  money,
+  pct,
+  precisePct,
+} from "./ui.jsx";
 
-export default function Home({ shipments, onOpen }) {
-  const atRisk = shipments.filter((s) => s.requiresInvestigation);
-  // Impact is not provided by the backend yet; show "Not available" until it is.
-  const withImpact = shipments.filter((s) => s.impact?.cost != null);
-  const cost = withImpact.length ? withImpact.reduce((a, s) => a + s.impact.cost, 0) : null;
-  const avg = shipments.reduce((a, s) => a + s.delayProbability, 0) / (shipments.length || 1);
-  const stats = [
-    ["Active shipments", shipments.length],
-    ["Need investigation", atRisk.length],
-    ["Average delay probability", pct(avg)],
-    ["Value at risk", money(cost)],
-  ];
+
+function countRisk(
+  shipments,
+  riskLevel,
+) {
+  return shipments.filter(
+    (
+      shipment,
+    ) =>
+      shipment.riskLevel
+      === riskLevel,
+  ).length;
+}
+
+
+export default function Home({
+  shipments,
+  onOpen,
+  onInvestigate,
+}) {
+  const atRisk = shipments.filter(
+    (
+      shipment,
+    ) =>
+      shipment
+        .requiresInvestigation,
+  );
+
+  const highRisk = countRisk(
+    shipments,
+    "high",
+  );
+
+  const mediumRisk = countRisk(
+    shipments,
+    "medium",
+  );
+
+  const lowRisk = countRisk(
+    shipments,
+    "low",
+  );
+
+  const averageProbability = (
+    shipments.reduce(
+      (
+        total,
+        shipment,
+      ) =>
+        total
+        + shipment
+          .delayProbability,
+      0,
+    )
+    / (
+      shipments.length
+      || 1
+    )
+  );
+
+  const shipmentsWithImpact = (
+    shipments.filter(
+      (
+        shipment,
+      ) =>
+        shipment.impact?.cost
+        != null,
+    )
+  );
+
+  const valueAtRisk = (
+    shipmentsWithImpact.length
+      ? shipmentsWithImpact.reduce(
+        (
+          total,
+          shipment,
+        ) =>
+          total
+          + shipment
+            .impact
+            .cost,
+        0,
+      )
+      : null
+  );
+
+  const highestRiskShipments = [
+    ...shipments,
+  ]
+    .sort(
+      (
+        first,
+        second,
+      ) =>
+        second.delayProbability
+        - first.delayProbability,
+    )
+    .slice(
+      0,
+      5,
+    );
+
   return (
-    <>
-      <section className="hero">
-        <h1>{atRisk.length} shipments need attention today</h1>
-        <p>Delays are predicted before they turn into stockouts. Open a shipment to see why, and what to do.</p>
+    <div className="home-layout">
+      <section className="hero control-hero">
+        <div>
+          <small className="eyebrow">
+            Supply Chain Control Tower
+          </small>
+
+          <h1>
+            {atRisk.length}
+            {" "}
+            {atRisk.length === 1
+              ? "shipment needs"
+              : "shipments need"}
+            {" "}
+            attention
+          </h1>
+
+          <p>
+            Predict delay risk, investigate contributing
+            factors, retrieve operational guidance, and
+            generate grounded disruption briefings before
+            issues become operational disruptions.
+          </p>
+        </div>
+
+        <div className="hero-system">
+          <span>From risk to action</span>
+
+          <strong>
+            Predict risk → Investigate causes → Recommend actions
+          </strong>
+
+          <small>
+            Shipment, weather, supplier, and operational
+            guidance are reviewed before recommendations
+            are generated.
+          </small>
+        </div>
       </section>
-      <div className="stats">
-        {stats.map(([l, v]) => <div className="stat" key={l}><b>{v}</b><span>{l}</span></div>)}
-      </div>
-      <h2>Highest risk right now</h2>
-      <div className="stack">
-        {[...shipments].sort((a, b) => b.delayProbability - a.delayProbability).slice(0, 4).map((s) => (
-          <button key={s.id} className="row" onClick={() => onOpen(s.id)}>
-            <strong>{s.id}</strong>
-            <span>To {s.details.destination}</span>
-            <Meter value={s.delayProbability} level={s.riskLevel} />
-            <em>{pct(s.delayProbability)}</em>
-            <RiskBadge level={s.riskLevel} />
-          </button>
-        ))}
-      </div>
-    </>
+
+      <section className="stats dashboard-stats">
+        <div className="stat">
+          <b>
+            {shipments.length}
+          </b>
+
+          <span>
+            Active shipments
+          </span>
+        </div>
+
+        <div className="stat risk-stat high">
+          <b>
+            {highRisk}
+          </b>
+
+          <span>
+            High risk
+          </span>
+        </div>
+
+        <div className="stat risk-stat medium">
+          <b>
+            {mediumRisk}
+          </b>
+
+          <span>
+            Medium risk
+          </span>
+        </div>
+
+        <div className="stat risk-stat low">
+          <b>
+            {lowRisk}
+          </b>
+
+          <span>
+            Low risk
+          </span>
+        </div>
+
+        <div className="stat">
+          <b>
+            {pct(
+              averageProbability,
+            )}
+          </b>
+
+          <span>
+            Average delay probability
+          </span>
+        </div>
+
+        <div className="stat">
+          <b>
+            {money(
+              valueAtRisk,
+            )}
+          </b>
+
+          <span>
+            Value at risk
+          </span>
+        </div>
+      </section>
+
+      <section className="home-section">
+        <div className="section-copy home-section-heading">
+          <small className="eyebrow">
+            Priority queue
+          </small>
+
+          <h2>
+            Highest predicted risk
+          </h2>
+
+          <p>
+            Shipment risk is generated by the XGBoost model.
+            Investigation results appear after the agent
+            completes its evidence collection.
+          </p>
+        </div>
+
+        <div className="stack">
+          {highestRiskShipments.map(
+            (
+              shipment,
+            ) => (
+              <article
+                key={
+                  shipment.id
+                }
+                className="dashboard-row"
+              >
+                <button
+                  className="dashboard-row-main"
+                  onClick={() =>
+                    onOpen(
+                      shipment.id,
+                    )
+                  }
+                >
+                  <div>
+                    <strong>
+                      {shipment.id}
+                    </strong>
+
+                    <span>
+                      {
+                        shipment
+                          .details
+                          .product
+                      }
+                    </span>
+                  </div>
+
+                  <div className="dashboard-destination">
+                    <small>
+                      Destination
+                    </small>
+
+                    <span>
+                      {
+                        shipment
+                          .details
+                          .destination
+                      }
+                    </span>
+                  </div>
+
+                  <div className="dashboard-probability">
+                    <Meter
+                      value={
+                        shipment
+                          .delayProbability
+                      }
+                      level={
+                        shipment
+                          .riskLevel
+                      }
+                    />
+
+                    <strong>
+                      {precisePct(
+                        shipment
+                          .delayProbability,
+                      )}
+                    </strong>
+                  </div>
+
+                  <RiskBadge
+                    level={
+                      shipment
+                        .riskLevel
+                    }
+                  />
+
+                  <StatusChip
+                    status={
+                      shipment
+                        .investigationStatus
+                    }
+                  />
+                </button>
+
+                <div className="dashboard-row-action">
+                  {shipment
+                    .requiresInvestigation
+                    ? (
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          onInvestigate(
+                            shipment.id,
+                          )
+                        }
+                      >
+                        {shipment
+                          .investigationStatus
+                          === "complete"
+                          ? "View investigation"
+                          : "Investigate"}
+                      </button>
+                    )
+                    : (
+                      <span className="monitor-label">
+                        Routine monitoring
+                      </span>
+                    )}
+                </div>
+              </article>
+            ),
+          )}
+        </div>
+      </section>
+
+    </div>
   );
 }
