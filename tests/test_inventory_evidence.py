@@ -31,6 +31,7 @@ from backend.services import (
 from backend.services.agent_service import (
     INVENTORY_SCOPE_LIMITATION,
     INVENTORY_UNAVAILABLE,
+    SUPPLIER_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     _format_coverage,
@@ -52,7 +53,6 @@ UNREPORTED_DETAILS = [
     "WH-TEST-07",
     "Rotterdam",
     "Netherlands",
-    "supplier_id",
     "SUP-TEST-99",
     "reorder",
     "4321",
@@ -158,6 +158,7 @@ def test_collected_inventory_adds_the_scope_limitation(high_risk):
 
     assert briefing.limitations == [
         INVENTORY_SCOPE_LIMITATION,
+        SUPPLIER_SCOPE_LIMITATION,
         WEATHER_SCOPE_LIMITATION,
         *UNCOLLECTED_EVIDENCE_LIMITATIONS,
     ]
@@ -326,6 +327,7 @@ def test_inventory_failure_becomes_a_safe_limitation(
 
     assert briefing.limitations == [
         FAILURE_LIMITATION,
+        SUPPLIER_SCOPE_LIMITATION,
         WEATHER_SCOPE_LIMITATION,
         *UNCOLLECTED_EVIDENCE_LIMITATIONS,
     ]
@@ -377,13 +379,16 @@ def test_inventory_failure_emits_tool_error_and_the_stream_completes(
 
     events = stream_events(client)
 
+    # The failure is reported, then the supplier step still runs.
     assert [
         (name, data["name"]) for name, data in events if name.startswith("tool_")
-    ][-2:] == [
+    ][-4:] == [
         ("tool_start", "get_inventory_coverage"),
         ("tool_error", "get_inventory_coverage"),
+        ("tool_start", "find_alternative_supplier"),
+        ("tool_complete", "find_alternative_supplier"),
     ]
-    assert events[-3] == (
+    assert events[-5] == (
         "tool_error",
         {
             "name": "get_inventory_coverage",
@@ -492,8 +497,8 @@ def test_trace_record_that_cannot_be_built_becomes_a_safe_limitation(
     assert body["limitations"][0] == FAILURE_LIMITATION
     assert INVENTORY_SCOPE_LIMITATION not in body["limitations"]
 
-    assert events[-3][0] == "tool_error"
-    assert events[-3][1]["error"] == INVENTORY_UNAVAILABLE
+    assert events[-5][0] == "tool_error"
+    assert events[-5][1]["error"] == INVENTORY_UNAVAILABLE
     assert events[-1] == ("done", body)
 
     for detail in ["trace defect", "RuntimeError", "srv", "inventory.csv"]:
@@ -526,6 +531,7 @@ def test_inventory_failure_alongside_other_failures_keeps_their_order(
         ("get_historical_delay_context", "error"),
         ("get_destination_weather", "success"),
         ("get_inventory_coverage", "error"),
+        ("find_alternative_supplier", "success"),
     ]
     # Other sources keep reporting their own failure text.
     assert briefing.limitations[:2] == [
@@ -559,7 +565,7 @@ def test_low_risk_shipment_never_reaches_the_inventory_tool(
 
 
 @pytest.mark.parametrize("risk_level", [RiskLevel.MEDIUM, RiskLevel.HIGH])
-def test_medium_and_high_risk_shipments_collect_inventory_last(
+def test_medium_and_high_risk_shipments_collect_inventory_after_weather(
     shipment_data,
     monkeypatch,
     risk_level,
@@ -582,4 +588,5 @@ def test_medium_and_high_risk_shipments_collect_inventory_last(
         "get_historical_delay_context",
         "get_destination_weather",
         "get_inventory_coverage",
+        "find_alternative_supplier",
     ]

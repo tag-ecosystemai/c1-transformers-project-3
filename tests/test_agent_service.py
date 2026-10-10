@@ -12,6 +12,7 @@ from backend.models.schemas import (
 from backend.services import agent_service
 from backend.services.agent_service import (
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     run_investigation,
@@ -25,12 +26,15 @@ EXPECTED_TOOLS = [
     "get_historical_delay_context",
     "get_destination_weather",
     "get_inventory_coverage",
+    "find_alternative_supplier",
 ]
 
-# The inventory step runs last, so the note on its record follows any
-# failure and comes before the notes that apply to every briefing.
+# The inventory and supplier steps run last, so the notes on what they
+# collected follow any failure and come before the notes that apply to
+# every briefing.
 STANDING_LIMITATIONS = [
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
@@ -66,10 +70,21 @@ def test_successful_investigation_returns_briefing(high_risk):
     )
 
 
-def test_investigation_does_not_invent_uncollected_evidence(high_risk):
+def test_investigation_does_not_invent_uncollected_evidence(
+    high_risk,
+    monkeypatch,
+):
+    def unavailable(shipment):
+        raise RuntimeError("no evidence source")
+
+    monkeypatch.setattr(agent_service, "get_alternative_suppliers", unavailable)
+    monkeypatch.setattr(agent_service, "get_inventory_coverage", unavailable)
+
     evidence = run_investigation("SHP-153440").evidence
 
+    # Evidence that was not collected stays empty.
     assert evidence.supplier_status is None
+    assert evidence.inventory_summary is None
     assert evidence.inventory_coverage_days is None
 
 
@@ -86,6 +101,7 @@ def test_tool_trace_records_each_call_in_order(high_risk):
     assert trace[2].output["highest_delay_rate_factor"] == "product"
     assert trace[3].output["source"] == "Open-Meteo historical archive"
     assert trace[4].output["inventory_coverage_days"] == 17.13
+    assert trace[5].output["candidate_count"] == 2
 
 
 def test_limitations_list_uncollected_evidence(high_risk):
@@ -102,7 +118,37 @@ def test_weather_step_populates_weather_evidence(high_risk):
         "9.2 mm precipitation (max 8.9 mm/day), max wind 17.9 km/h; "
         "worst condition slight rain (low severity)."
     )
-    assert "environmental evidence: Observed weather" in briefing.summary
+    assert briefing.evidence.weather_summary in briefing.summary
+
+
+def test_briefing_cites_the_retrieved_operational_documents(high_risk):
+    briefing = run_investigation("SHP-153440")
+
+    # Citations come from retrieval, never from fixed placeholders.
+    assert briefing.rag_policy_citations == [
+        "01_shipment_delay_escalation.pdf",
+        "02_weather_disruption_sop.pdf",
+        "03_supplier_alternative_policy.pdf",
+    ]
+    assert not any("SOP-" in citation for citation in briefing.rag_policy_citations)
+    assert briefing.recommended_actions[0] == "Continue human operational review."
+
+
+def test_briefing_is_generated_from_the_collected_evidence(high_risk):
+    briefing = run_investigation("SHP-153440")
+
+    assert briefing.summary.startswith(
+        "Shipment SHP-153440 has a HIGH predicted delay risk of 82.0%."
+    )
+    for collected in (
+        briefing.evidence.shipment_summary,
+        briefing.evidence.historical_delay_summary,
+        briefing.evidence.weather_summary,
+        briefing.evidence.inventory_summary,
+        briefing.evidence.supplier_status,
+    ):
+        assert collected in briefing.summary
+    assert "Supplier availability has not yet been assessed." not in briefing.summary
 
 
 def test_weather_failure_becomes_limitation(high_risk, monkeypatch):

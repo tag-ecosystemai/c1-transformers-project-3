@@ -11,6 +11,7 @@ from backend.models.schemas import DisruptionBriefingResponse
 from backend.services import agent_service
 from backend.services.agent_service import (
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     iter_investigation,
@@ -30,17 +31,23 @@ EXPECTED_TOOLS = [
     "get_historical_delay_context",
     "get_destination_weather",
     "get_inventory_coverage",
+    "find_alternative_supplier",
 ]
 
-# The inventory step runs last, so the note on its record follows any
-# failure and comes before the notes that apply to every briefing.
+# The inventory and supplier steps run last, so the notes on what they
+# collected follow any failure and come before the notes that apply to
+# every briefing.
 STANDING_LIMITATIONS = [
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
 
 TERMINAL_EVENTS = {"done", "error"}
+
+# The function behind each tool, where it is not named after the tool.
+TOOL_FUNCTIONS = {"find_alternative_supplier": "get_alternative_suppliers"}
 
 
 @pytest.fixture
@@ -250,6 +257,8 @@ def test_historical_context_failure_emits_tool_error_and_continues(
         ("tool_complete", "get_destination_weather"),
         ("tool_start", "get_inventory_coverage"),
         ("tool_complete", "get_inventory_coverage"),
+        ("tool_start", "find_alternative_supplier"),
+        ("tool_complete", "find_alternative_supplier"),
     ]
 
     name, done = events[-1]
@@ -274,6 +283,7 @@ def test_low_risk_shipment_ends_with_not_required_error(
 ):
     forbid(monkeypatch, "get_shipment")
     forbid(monkeypatch, "get_inventory_coverage")
+    forbid(monkeypatch, "get_alternative_suppliers")
 
     events = stream(client)
 
@@ -338,6 +348,7 @@ def test_required_tool_failure_ends_stream_with_error(
     forbid(monkeypatch, "get_historical_delay_context")
     forbid(monkeypatch, "get_destination_weather")
     forbid(monkeypatch, "get_inventory_coverage")
+    forbid(monkeypatch, "get_alternative_suppliers")
 
     events = stream(client)
 
@@ -370,7 +381,7 @@ def test_briefing_failure_ends_stream_with_error(
     events = stream(client)
 
     # Every tool succeeded, but without a briefing there is no done event.
-    assert names(events).count("tool_complete") == 5
+    assert names(events).count("tool_complete") == 6
     assert "tool_error" not in names(events)
     assert "done" not in names(events)
     assert events[-1][1]["status"] == 500
@@ -456,13 +467,14 @@ def record_tool_executions(monkeypatch, log: list) -> None:
     to the same log as the events the consumer receives.
     """
     for tool in EXPECTED_TOOLS:
-        original = getattr(agent_service, tool)
+        function = TOOL_FUNCTIONS.get(tool, tool)
+        original = getattr(agent_service, function)
 
         def recorded(*args, _tool=tool, _original=original, **kwargs):
             log.append(("executes", _tool))
             return _original(*args, **kwargs)
 
-        monkeypatch.setattr(agent_service, tool, recorded)
+        monkeypatch.setattr(agent_service, function, recorded)
 
 
 def test_tool_start_is_received_before_the_tool_executes(
@@ -539,6 +551,8 @@ def test_both_optional_failures_keep_order_and_match_synchronous_response(
         ("tool_error", "get_destination_weather"),
         ("tool_start", "get_inventory_coverage"),
         ("tool_complete", "get_inventory_coverage"),
+        ("tool_start", "find_alternative_supplier"),
+        ("tool_complete", "find_alternative_supplier"),
     ]
     assert [(call["tool"], call["status"]) for call in done["tool_trace"]] == [
         ("get_delay_risk", "success"),
@@ -546,6 +560,7 @@ def test_both_optional_failures_keep_order_and_match_synchronous_response(
         ("get_historical_delay_context", "error"),
         ("get_destination_weather", "error"),
         ("get_inventory_coverage", "success"),
+        ("find_alternative_supplier", "success"),
     ]
     # Failures first, in the order the tools ran, then the standing notes.
     assert done["limitations"] == [

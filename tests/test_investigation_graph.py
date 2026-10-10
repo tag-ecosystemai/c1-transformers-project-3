@@ -16,6 +16,7 @@ from backend.services.agent_service import (
     EVIDENCE_SOURCES,
     INVESTIGATION_GRAPH,
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     UNCOLLECTED_EVIDENCE_LIMITATIONS,
     WEATHER_SCOPE_LIMITATION,
     EvidenceSource,
@@ -33,12 +34,15 @@ EXPECTED_TOOLS = [
     "get_historical_delay_context",
     "get_destination_weather",
     "get_inventory_coverage",
+    "find_alternative_supplier",
 ]
 
-# The inventory step runs last, so the note on its record follows any
-# failure and comes before the notes that apply to every briefing.
+# The inventory and supplier steps run last, so the notes on what they
+# collected follow any failure and come before the notes that apply to
+# every briefing.
 STANDING_LIMITATIONS = [
     INVENTORY_SCOPE_LIMITATION,
+    SUPPLIER_SCOPE_LIMITATION,
     WEATHER_SCOPE_LIMITATION,
     *UNCOLLECTED_EVIDENCE_LIMITATIONS,
 ]
@@ -118,8 +122,10 @@ def test_graph_routes_are_explicit():
         ("get_historical_delay_context", "__end__"),
         ("get_destination_weather", "get_inventory_coverage"),
         ("get_destination_weather", "__end__"),
-        ("get_inventory_coverage", "generate_briefing"),
+        ("get_inventory_coverage", "find_alternative_supplier"),
         ("get_inventory_coverage", "__end__"),
+        ("find_alternative_supplier", "generate_briefing"),
+        ("find_alternative_supplier", "__end__"),
         ("generate_briefing", "__end__"),
     }
 
@@ -152,6 +158,7 @@ def test_low_risk_routes_to_not_required_and_stops(low_risk, monkeypatch):
         "get_historical_delay_context",
         "get_destination_weather",
         "get_inventory_coverage",
+        "get_alternative_suppliers",
         "generate_rag_briefing",
     )
 
@@ -243,7 +250,7 @@ def test_later_steps_use_the_normalized_shipment_reference(
     # the reference the prediction returned.
     assert starts == [
         {"shipment_id": " shp-153440"},
-        *[{"shipment_id": "SHP-153440"}] * 4,
+        *[{"shipment_id": "SHP-153440"}] * 5,
     ]
     assert looked_up == ["SHP-153440"]
 
@@ -259,7 +266,12 @@ def test_evidence_from_every_source_is_merged_into_state(high_risk):
     assert state["evidence"].weather_summary.startswith(
         "Observed weather in Vassouras, Brazil"
     )
-    assert state["evidence"].supplier_status is None
+    assert state["evidence"].inventory_summary.startswith(
+        "Inventory record for 'Trail Running Shoe'"
+    )
+    assert state["evidence"].supplier_status.startswith(
+        "Alternative supplier candidate for product category 'Cleats'"
+    )
     assert state["limitations"] == STANDING_LIMITATIONS
     assert state["briefing"].limitations == state["limitations"]
     assert state["briefing"].tool_trace == state["tool_trace"]
@@ -347,6 +359,7 @@ def test_required_step_failure_ends_the_investigation(high_risk, monkeypatch):
         "get_historical_delay_context",
         "get_destination_weather",
         "get_inventory_coverage",
+        "get_alternative_suppliers",
         "generate_rag_briefing",
     )
 
@@ -407,7 +420,12 @@ def test_unexpected_weather_failure_is_fatal_not_a_limitation(
         "get_destination_weather",
         defective_weather,
     )
-    forbid(monkeypatch, "get_inventory_coverage", "generate_rag_briefing")
+    forbid(
+        monkeypatch,
+        "get_inventory_coverage",
+        "get_alternative_suppliers",
+        "generate_rag_briefing",
+    )
 
     state = investigate()
 
@@ -429,7 +447,7 @@ def test_briefing_failure_ends_the_investigation(high_risk, monkeypatch):
 
     assert state["status"] is InvestigationStatus.FAILED
     assert state["failure"] is error
-    assert len(state["tool_trace"]) == 5
+    assert len(state["tool_trace"]) == 6
     assert "briefing" not in state
 
 
@@ -489,28 +507,28 @@ def test_a_new_evidence_source_only_needs_to_be_registered(
     high_risk,
     monkeypatch,
 ):
-    supplier = EvidenceSource(
-        tool="get_supplier_status",
-        collect=lambda shipment: {"status": "on schedule"},
+    whole_days = EvidenceSource(
+        tool="get_whole_day_coverage",
+        collect=lambda shipment: {"days": 12},
         summarize=lambda result: ToolEvidence(
-            supplier_status=f"Supplier is {result['status']}."
+            inventory_coverage_days=result["days"]
         ),
-        limitation="Supplier status was not collected",
+        limitation="Whole-day coverage was not collected",
         optional_errors=(Exception,),
     )
     monkeypatch.setattr(
         agent_service,
         "EVIDENCE_SOURCES",
-        (*EVIDENCE_SOURCES, supplier),
+        (*EVIDENCE_SOURCES, whole_days),
     )
 
     state = build_investigation_graph().invoke({"shipment_id": "SHP-153440"})
 
     assert [call.tool for call in state["tool_trace"]] == [
         *EXPECTED_TOOLS,
-        "get_supplier_status",
+        "get_whole_day_coverage",
     ]
     assert state["status"] is InvestigationStatus.COMPLETED
     # The new evidence reaches the briefing with the rest.
-    assert state["briefing"].evidence.supplier_status == "Supplier is on schedule."
+    assert state["briefing"].evidence.inventory_coverage_days == 12
     assert state["briefing"].evidence.weather_summary is not None

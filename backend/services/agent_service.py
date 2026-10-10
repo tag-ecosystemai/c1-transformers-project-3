@@ -11,6 +11,7 @@ The shipment investigation, orchestrated as a LangGraph workflow.
         get_historical_delay_context
         get_destination_weather
         get_inventory_coverage
+        find_alternative_supplier
         (an optional failure becomes a limitation; any other
          failure ends the investigation)
         v
@@ -47,6 +48,7 @@ from backend.models.schemas import (
     InventoryStatusResponse,
     PredictionResponse,
     ShipmentResponse,
+    SupplierRecommendation,
     ToolCall,
     ToolCallStatus,
     ToolEvidence,
@@ -56,6 +58,7 @@ from backend.exceptions import (
     WeatherServiceError,
 )
 from backend.services.agent_tools import (
+    get_alternative_suppliers,
     get_delay_risk,
     get_destination_weather,
     get_historical_delay_context,
@@ -110,12 +113,61 @@ INVENTORY_TRACE_FIELDS = frozenset(
     }
 )
 
-# Evidence that this version of the investigation does not collect yet.
-UNCOLLECTED_EVIDENCE_LIMITATIONS = [
-    "Supplier status was not collected: no supplier data source is available.",
-    "Policy citations and recommended actions come from the briefing "
-    "service placeholder: RAG retrieval is not yet integrated.",
-]
+# Recorded whenever supplier candidates are collected. Candidates are
+# matched on product category only: the supplier dataset holds no
+# available capacity, commercial terms, live status or delivery dates,
+# and no link to the shipment or its current supplier.
+SUPPLIER_SCOPE_LIMITATION = (
+    "Supplier candidates are category-level suggestions; supplier "
+    "availability, capacity, commercial terms and delivery dates have "
+    "not been verified, and human approval is required before "
+    "changing suppliers."
+)
+
+# Reported in place of a supplier failure's own message, which can
+# name server files and is only written to the log.
+SUPPLIER_UNAVAILABLE = (
+    "No alternative supplier candidate could be retrieved for this "
+    "shipment's product category."
+)
+
+# What the trace records of each supplier candidate: who it is, where
+# it is, what it supplies, and the recorded figures the suggestion is
+# explained by. Cancellation, quality-issue and capacity-utilization
+# rates are not reported: they explain nothing a reader is told, and a
+# utilization figure invites a conclusion about spare capacity that the
+# records cannot support.
+SUPPLIER_CANDIDATE_TRACE_FIELDS = frozenset(
+    {
+        "supplier_id",
+        "supplier_name",
+        "supplier_country",
+        "product_category",
+        "average_lead_time_days",
+        "on_time_delivery_rate",
+        "supplier_risk_score",
+        "supplier_risk_level",
+        "data_source",
+    }
+)
+
+# How candidates are found and how one comes to be suggested, as the
+# supplier service does it.
+SUPPLIER_MATCHED_ON = (
+    "product category (the shipment's category or a listed compatible "
+    "supplier category)"
+)
+
+SUPPLIER_SELECTION_BASIS = (
+    "Candidates are ranked by the supplier service: a supplier country "
+    "matching the shipment destination first, then lower supplier risk "
+    "and recorded performance. The suggested candidate is the "
+    "highest-ranked one with LOW or MEDIUM supplier risk."
+)
+
+# Evidence that this version of the investigation does not collect
+# yet. Every evidence field now has a source, so there is none.
+UNCOLLECTED_EVIDENCE_LIMITATIONS: list[str] = []
 
 
 # Progress events reported while an investigation runs.
@@ -341,6 +393,74 @@ def _inventory_trace_output(record: InventoryStatusResponse) -> dict[str, Any]:
     }
 
 
+def _summarize_supplier(recommendation: SupplierRecommendation) -> str:
+    # Only what the supplier records hold is reported. A candidate is a
+    # suggestion to review, never an available or committed supplier.
+    if not recommendation.alternatives:
+        raise ValueError("The supplier lookup returned no candidates.")
+
+    count = recommendation.candidate_count
+    compared = (
+        f"{count} candidate{'' if count == 1 else 's'} on record for "
+        "the category"
+    )
+    supplier = recommendation.recommended_supplier
+
+    if supplier is None:
+        return (
+            "No alternative supplier is suggested for product category "
+            f"'{recommendation.category}': the {compared} "
+            f"{'is' if count == 1 else 'are'} classified as high risk "
+            f"and {'needs' if count == 1 else 'need'} human review."
+        )
+
+    return (
+        "Alternative supplier candidate for product category "
+        f"'{recommendation.category}': {supplier.supplier_name} "
+        f"({supplier.supplier_id}), based in {supplier.supplier_country}, "
+        f"supplying {supplier.product_category}. On record: average "
+        f"lead time {supplier.average_lead_time_days:g} days, on-time "
+        f"delivery rate {supplier.on_time_delivery_rate:.1%}, supplier "
+        f"risk {supplier.supplier_risk_level.value} "
+        f"({supplier.supplier_risk_score:g}/100). It was selected from "
+        f"{compared}. This is a category-level suggestion; supplier "
+        "availability, capacity for the required quantity and "
+        "commercial terms have not been verified."
+    )
+
+
+def _supplier_trace_output(
+    recommendation: SupplierRecommendation,
+) -> dict[str, Any]:
+    # Enough to tell the candidates apart and explain the suggestion,
+    # and no more. That capacity for the quantity is unverified stays
+    # explicit, and the service's own note is replaced by the
+    # limitation the briefing reports.
+    def candidate(supplier: Any) -> dict[str, Any]:
+        return supplier.model_dump(
+            mode="json",
+            include=SUPPLIER_CANDIDATE_TRACE_FIELDS,
+        )
+
+    suggested = recommendation.recommended_supplier
+
+    return {
+        "category": recommendation.category,
+        "matched_on": SUPPLIER_MATCHED_ON,
+        "selection_basis": SUPPLIER_SELECTION_BASIS,
+        "candidate_count": recommendation.candidate_count,
+        "recommended_supplier": (
+            None if suggested is None else candidate(suggested)
+        ),
+        "alternatives": [
+            candidate(supplier) for supplier in recommendation.alternatives
+        ],
+        "quantity_capacity_verified": recommendation.quantity_capacity_verified,
+        "data_source": recommendation.data_source,
+        "limitation": SUPPLIER_SCOPE_LIMITATION,
+    }
+
+
 # ============================================================
 # EVIDENCE SOURCES
 # ============================================================
@@ -413,6 +533,24 @@ EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         success_limitations=(INVENTORY_SCOPE_LIMITATION,),
         trace_output=lambda record: _inventory_trace_output(record),
         public_error=INVENTORY_UNAVAILABLE,
+    ),
+    # Supplier candidates are suggestions for review. Nothing later
+    # depends on them, so no failure of this step ends the
+    # investigation: a category without candidates, an unreadable
+    # dataset and a result with nothing usable all become a limitation.
+    EvidenceSource(
+        tool="find_alternative_supplier",
+        collect=lambda shipment: get_alternative_suppliers(shipment),
+        summarize=lambda recommendation: ToolEvidence(
+            supplier_status=_summarize_supplier(recommendation)
+        ),
+        limitation="Supplier evidence was not collected",
+        optional_errors=(Exception,),
+        success_limitations=(SUPPLIER_SCOPE_LIMITATION,),
+        trace_output=lambda recommendation: _supplier_trace_output(
+            recommendation
+        ),
+        public_error=SUPPLIER_UNAVAILABLE,
     ),
 )
 
@@ -536,17 +674,22 @@ def _generate_briefing(state: InvestigationState) -> InvestigationState:
     except Exception as exc:
         return _failed(exc)
 
+    # The briefing reports its own limitations, such as supporting
+    # documents that could not be retrieved. They follow the evidence
+    # limitations and come before the notes on every briefing.
+    briefing_limitations = [*briefing.limitations, *standing_limitations]
+
     # The trace and limitations are attached here so the briefing
     # service's interface stays unchanged.
     briefing = briefing.model_copy(
         update={
             "tool_trace": state["tool_trace"],
-            "limitations": [*state.get("limitations", []), *standing_limitations],
+            "limitations": [*state.get("limitations", []), *briefing_limitations],
         }
     )
 
     return {
-        "limitations": standing_limitations,
+        "limitations": briefing_limitations,
         "briefing": briefing,
         "status": InvestigationStatus.COMPLETED,
     }
@@ -643,7 +786,7 @@ def iter_investigation(
     only shipments flagged as requiring investigation are processed.
 
     Flow: risk gate, shipment facts, historical delay context,
-    destination weather, inventory record, briefing. Every tool call is recorded in the response's tool_trace.
+    destination weather, inventory record, supplier candidates, briefing. Every tool call is recorded in the response's tool_trace.
     The risk gate and shipment facts are required; other evidence that
     cannot be collected is reported in limitations.
 

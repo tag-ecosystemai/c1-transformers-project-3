@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "supply-chain-intelligence"
 version = "0.1.0"
 description = "AI powered supply chain risk investigation system"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -22,6 +22,7 @@ dependencies = [
     "langchain-text-splitters",
     "langchain-openai",
     "langchain-chroma",
+    "chromadb",
     "pypdf",
     "docx2txt",
     "pydantic-settings",
@@ -36,3 +37,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend", "rag"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests requiring external services or persisted integration assets",
+]

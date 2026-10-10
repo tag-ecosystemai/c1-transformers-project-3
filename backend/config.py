@@ -4,29 +4,52 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Absolute path to the repository root.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
     """Central configuration for the backend application."""
 
-    # Application
+    # ========================================================
+    # APPLICATION
+    # ========================================================
+
     app_name: str = "Supply-Chain Disruption Agent API"
     app_environment: str = "development"
     debug: bool = False
     mock_mode: bool = False
 
-    # Frontend
-    frontend_url: str = "http://localhost:3000"
+    # ========================================================
+    # BACKEND
+    # ========================================================
 
-    # Shipment Tool
+    backend_host: str = "0.0.0.0"
+    backend_port: int = 8000
+    backend_url: str = "http://localhost:8000"
+
+    # ========================================================
+    # FRONTEND
+    # ========================================================
+
+    frontend_url: str = (
+        "http://localhost:3000,"
+        "http://localhost:5173"
+    )
+
+    # ========================================================
+    # SHIPMENT TOOL
+    # ========================================================
+
     shipment_data_path: Path = (
         PROJECT_ROOT
         / "data"
         / "processed"
         / "shipment_tool_data.csv"
     )
+
+    # ========================================================
+    # MACHINE LEARNING
+    # ========================================================
 
     model_data_path: Path = (
         PROJECT_ROOT
@@ -35,7 +58,6 @@ class Settings(BaseSettings):
         / "df_model.zip"
     )
 
-    # Machine-learning artifacts
     model_path: Path = (
         PROJECT_ROOT
         / "models"
@@ -48,37 +70,64 @@ class Settings(BaseSettings):
         / "preprocessor.joblib"
     )
 
-    # Provisional until validation-based threshold selection is finalized.
     risk_threshold: float = 0.40
     high_risk_threshold: float = 0.70
 
+    # ========================================================
+    # WEATHER TOOL
+    # ========================================================
+
+    weather_api_base_url: str = (
+        "https://archive-api.open-meteo.com/v1/archive"
+    )
+
+    weather_geocoding_url: str = (
+        "https://geocoding-api.open-meteo.com/v1/search"
+    )
+
+    weather_timeout_seconds: float = 10.0
+    weather_api_key: str | None = None
+
+    # ========================================================
     # RAG
-    rag_persist_directory: Path = (
+    # ========================================================
+
+    rag_documents_path: Path = (
+        PROJECT_ROOT
+        / "rag"
+        / "documents"
+    )
+
+    vector_store_path: Path = (
         PROJECT_ROOT
         / "rag"
         / "vector_store"
     )
+
     rag_collection_name: str = "operational_sops"
 
-    # Azure OpenAI
+    rag_chunk_size: int = 1000
+    rag_chunk_overlap: int = 200
+    rag_top_k: int = 5
+
+    # ========================================================
+    # AZURE OPENAI
+    # ========================================================
+
     azure_openai_endpoint: str | None = None
     azure_openai_api_key: str | None = None
+    azure_openai_api_version: str = "2024-02-01"
+
+    azure_openai_chat_deployment: str | None = None
+    azure_openai_embedding_deployment: str | None = None
+
+    # Temporary compatibility with Joy's previous RAG code.
     azure_openai_deployment_name: str | None = None
-    azure_openai_api_version: str | None = None
 
-    # Weather Tool
-    # Open-Meteo historical archive and geocoding. No API key is required.
-    weather_api_base_url: str = (
-        "https://archive-api.open-meteo.com/v1/archive"
-    )
-    weather_geocoding_url: str = (
-        "https://geocoding-api.open-meteo.com/v1/search"
-    )
-    weather_timeout_seconds: float = 10.0
-    # Not used by Open-Meteo; kept for a provider that requires a key.
-    weather_api_key: str | None = None
+    # ========================================================
+    # SUPPLIER TOOL
+    # ========================================================
 
-    # Supplier Tool
     supplier_data_path: Path = (
         PROJECT_ROOT
         / "data"
@@ -86,7 +135,10 @@ class Settings(BaseSettings):
         / "supplier_tool_data.csv"
     )
 
-    # Inventory Tool
+    # ========================================================
+    # INVENTORY TOOL
+    # ========================================================
+
     inventory_data_path: Path = (
         PROJECT_ROOT
         / "data"
@@ -94,7 +146,10 @@ class Settings(BaseSettings):
         / "inventory_tool_data.csv"
     )
 
-    # Read environment-variable overrides from the local .env file.
+    # ========================================================
+    # PYDANTIC SETTINGS
+    # ========================================================
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -103,7 +158,7 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Create and cache one settings object per backend process."""
     return Settings()

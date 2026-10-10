@@ -1,5 +1,5 @@
-from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import joblib
@@ -19,26 +19,49 @@ from backend.models.schemas import (
     ShipmentResponse,
 )
 from backend.services.model_feature_service import (
-get_model_feature_row,
+    get_model_feature_row,
 )
-from backend.services.shipment_service import get_shipment_status
+from backend.services.shipment_service import (
+    get_shipment_status,
+)
 
 
-@lru_cache(maxsize=1)
-def load_model_artifacts() -> tuple[Any, Any]:
+# The model artifacts are loaded once per backend process.
+#
+# A simple lru_cache can allow more than one cold-start invocation when
+# multiple requests arrive before the first invocation finishes. This lock
+# ensures that only one request performs the expensive deserialization.
+_model_artifacts: tuple[Any, Any] | None = None
+_model_load_lock = Lock()
+
+
+def _load_model_artifacts_from_disk() -> tuple[Any, Any]:
     """
-    Load and cache the fitted preprocessor and XGBoost model.
+    Deserialize and validate the fitted preprocessor and XGBoost model.
+
+    This function performs the expensive disk-loading work. Callers
+    should use load_model_artifacts() instead of calling this function
+    directly.
     """
-    preprocessor_path = Path(settings.preprocessor_path)
-    model_path = Path(settings.model_path)
+    preprocessor_path = Path(
+        settings.preprocessor_path
+    )
+
+    model_path = Path(
+        settings.model_path
+    )
 
     missing_artifacts: list[str] = []
 
     if not preprocessor_path.exists():
-        missing_artifacts.append(str(preprocessor_path))
+        missing_artifacts.append(
+            str(preprocessor_path)
+        )
 
     if not model_path.exists():
-        missing_artifacts.append(str(model_path))
+        missing_artifacts.append(
+            str(model_path)
+        )
 
     if missing_artifacts:
         raise ModelArtifactError(
@@ -47,7 +70,9 @@ def load_model_artifacts() -> tuple[Any, Any]:
         )
 
     try:
-        preprocessor = joblib.load(preprocessor_path)
+        preprocessor = joblib.load(
+            preprocessor_path
+        )
     except Exception as exc:
         raise ModelArtifactError(
             "Unable to load the preprocessing artifact from "
@@ -55,19 +80,27 @@ def load_model_artifacts() -> tuple[Any, Any]:
         ) from exc
 
     try:
-        model = joblib.load(model_path)
+        model = joblib.load(
+            model_path
+        )
     except Exception as exc:
         raise ModelArtifactError(
             "Unable to load the XGBoost model from "
             f"'{model_path}': {exc}"
         ) from exc
 
-    if not hasattr(preprocessor, "transform"):
+    if not hasattr(
+        preprocessor,
+        "transform",
+    ):
         raise ModelArtifactError(
             "The loaded preprocessor does not provide transform()."
         )
 
-    if not hasattr(model, "predict_proba"):
+    if not hasattr(
+        model,
+        "predict_proba",
+    ):
         raise ModelArtifactError(
             "The loaded model does not provide predict_proba()."
         )
@@ -75,9 +108,31 @@ def load_model_artifacts() -> tuple[Any, Any]:
     return preprocessor, model
 
 
+def load_model_artifacts() -> tuple[Any, Any]:
+    """
+    Load and cache the fitted preprocessor and XGBoost model.
+
+    Artifacts are loaded exactly once per backend process. The lock
+    prevents concurrent cold-start requests from loading multiple model
+    copies and exhausting available memory.
+    """
+    global _model_artifacts
+
+    if _model_artifacts is not None:
+        return _model_artifacts
+
+    with _model_load_lock:
+        if _model_artifacts is None:
+            _model_artifacts = (
+                _load_model_artifacts_from_disk()
+            )
+
+    return _model_artifacts
+
+
 def get_expected_model_features(
     preprocessor: Any,
-) -> list[str]:
+) -> list:
     """
     Return the raw input columns expected by the fitted preprocessor.
     """
@@ -94,7 +149,10 @@ def get_expected_model_features(
             "must be supplied explicitly."
         )
 
-    return [str(feature) for feature in feature_names]
+    return [
+        str(feature)
+        for feature in feature_names
+    ]
 
 
 def prepare_model_features(
@@ -107,7 +165,9 @@ def prepare_model_features(
     """
     shipment_values = shipment.model_dump()
 
-    shipment_identifier = str(shipment.shipment_id)
+    shipment_identifier = str(
+        shipment.shipment_id
+    )
 
     order_item_id = getattr(
         shipment,
@@ -116,11 +176,15 @@ def prepare_model_features(
     )
 
     if order_item_id is None:
-        order_item_id = shipment_identifier.removeprefix(
-            "SHP-"
+        order_item_id = (
+            shipment_identifier.removeprefix(
+                "SHP-"
+            )
         )
 
-    order_item_id = str(order_item_id).strip()
+    order_item_id = str(
+        order_item_id
+    ).strip()
 
     if not order_item_id:
         raise ModelFeatureError(
@@ -135,7 +199,7 @@ def prepare_model_features(
 
     if pd.isna(order_date):
         raise ModelFeatureError(
-            f"Invalid order date for shipment "
+            "Invalid order date for shipment "
             f"'{shipment.shipment_id}'."
         )
 
@@ -149,10 +213,18 @@ def prepare_model_features(
         "department": shipment.department,
         "market": shipment.market,
         "customer_country": shipment.customer_country,
-        "destination_country": shipment.destination_country,
-        "destination_region": shipment.destination_region,
-        "destination_state": shipment.destination_state,
-        "destination_city": shipment.destination_city,
+        "destination_country": (
+            shipment.destination_country
+        ),
+        "destination_region": (
+            shipment.destination_region
+        ),
+        "destination_state": (
+            shipment.destination_state
+        ),
+        "destination_city": (
+            shipment.destination_city
+        ),
         "shipping_mode": shipment.shipping_mode,
         "scheduled_shipping_days": (
             shipment.scheduled_shipping_days
@@ -171,7 +243,8 @@ def prepare_model_features(
             shipment.historical_market_delay_rate
         ),
         "historical_shipping_mode_delay_rate": (
-            shipment.historical_shipping_mode_delay_rate
+            shipment
+            .historical_shipping_mode_delay_rate
         ),
 
         # Possible original DataCo field names
@@ -181,11 +254,21 @@ def prepare_model_features(
         "Category Name": shipment.category,
         "Department Name": shipment.department,
         "Market": shipment.market,
-        "Customer Country": shipment.customer_country,
-        "Order Country": shipment.destination_country,
-        "Order Region": shipment.destination_region,
-        "Order State": shipment.destination_state,
-        "Order City": shipment.destination_city,
+        "Customer Country": (
+            shipment.customer_country
+        ),
+        "Order Country": (
+            shipment.destination_country
+        ),
+        "Order Region": (
+            shipment.destination_region
+        ),
+        "Order State": (
+            shipment.destination_state
+        ),
+        "Order City": (
+            shipment.destination_city
+        ),
         "Shipping Mode": shipment.shipping_mode,
         "Days for shipment (scheduled)": (
             shipment.scheduled_shipping_days
@@ -202,12 +285,18 @@ def prepare_model_features(
         "order_year": int(order_date.year),
         "order_month": int(order_date.month),
         "order_day": int(order_date.day),
-        "order_dayofweek": int(order_date.dayofweek),
+        "order_dayofweek": int(
+            order_date.dayofweek
+        ),
         "order_hour": int(order_date.hour),
-        "order_quarter": int(order_date.quarter),
+        "order_quarter": int(
+            order_date.quarter
+        ),
     }
 
-    feature_values.update(shipment_values)
+    feature_values.update(
+        shipment_values
+    )
 
     missing_features = [
         feature
@@ -310,16 +399,22 @@ def predict_probability(
             )
             or (
                 shipment.shipment_id
-                if str(shipment.shipment_id).startswith("SHP-")
-                else f"SHP-{shipment.shipment_id}"
+                if str(
+                    shipment.shipment_id
+                ).startswith("SHP-")
+                else (
+                    f"SHP-{shipment.shipment_id}"
+                )
             )
         ),
         expected_features=expected_features,
     )
 
     try:
-        transformed_features = preprocessor.transform(
-            raw_features
+        transformed_features = (
+            preprocessor.transform(
+                raw_features
+            )
         )
     except Exception as exc:
         raise ModelInferenceError(
@@ -344,7 +439,8 @@ def predict_probability(
 
     if (
         model_feature_count is not None
-        and transformed_feature_count != model_feature_count
+        and transformed_feature_count
+        != model_feature_count
     ):
         raise ModelFeatureError(
             "Transformed feature count does not match the model. "
@@ -362,7 +458,9 @@ def predict_probability(
             f"'{shipment.shipment_id}': {exc}"
         ) from exc
 
-    probabilities = np.asarray(probabilities)
+    probabilities = np.asarray(
+        probabilities
+    )
 
     if probabilities.ndim != 2:
         raise ModelInferenceError(
@@ -381,9 +479,13 @@ def predict_probability(
             "probability."
         )
 
-    probability = float(probabilities[0, 1])
+    probability = float(
+        probabilities[0, 1]
+    )
 
-    if not np.isfinite(probability):
+    if not np.isfinite(
+        probability
+    ):
         raise ModelInferenceError(
             "The model returned a non-finite probability."
         )
@@ -403,7 +505,9 @@ def predict_delay_risk(
     Retrieve a shipment, run real model inference, and apply the
     configured risk gate.
     """
-    shipment = get_shipment_status(shipment_id)
+    shipment = get_shipment_status(
+        shipment_id
+    )
 
     if settings.mock_mode:
         raise ModelInferenceError(
@@ -411,12 +515,21 @@ def predict_delay_risk(
             "the saved model artifacts."
         )
 
-    probability = predict_probability(shipment)
+    probability = predict_probability(
+        shipment
+    )
 
-    risk_level, requires_investigation = classify_risk(
+    (
+        risk_level,
+        requires_investigation,
+    ) = classify_risk(
         probability=probability,
-        decision_threshold=settings.risk_threshold,
-        high_risk_threshold=settings.high_risk_threshold,
+        decision_threshold=(
+            settings.risk_threshold
+        ),
+        high_risk_threshold=(
+            settings.high_risk_threshold
+        ),
     )
 
     public_shipment_id = getattr(
@@ -426,12 +539,20 @@ def predict_delay_risk(
     )
 
     if not public_shipment_id:
-        raw_shipment_id = str(shipment.shipment_id).strip()
+        raw_shipment_id = str(
+            shipment.shipment_id
+        ).strip()
 
-        if raw_shipment_id.upper().startswith("SHP-"):
-            public_shipment_id = raw_shipment_id.upper()
+        if raw_shipment_id.upper().startswith(
+            "SHP-"
+        ):
+            public_shipment_id = (
+                raw_shipment_id.upper()
+            )
         else:
-            public_shipment_id = f"SHP-{raw_shipment_id}"
+            public_shipment_id = (
+                f"SHP-{raw_shipment_id}"
+            )
 
     public_shipment_id = str(
         public_shipment_id
@@ -439,14 +560,25 @@ def predict_delay_risk(
 
     return PredictionResponse(
         shipment_id=public_shipment_id,
-        delay_probability=round(probability, 4),
+        delay_probability=round(
+            probability,
+            4,
+        ),
         risk_level=risk_level,
-        requires_investigation=requires_investigation,
+        requires_investigation=(
+            requires_investigation
+        ),
     )
 
 
 def clear_model_cache() -> None:
     """
-    Clear cached artifacts for testing or model replacement.
+    Clear cached model artifacts for testing or model replacement.
+
+    The same model-loading lock is used so the cache cannot be cleared
+    while another request is loading model artifacts.
     """
-    load_model_artifacts.cache_clear()
+    global _model_artifacts
+
+    with _model_load_lock:
+        _model_artifacts = None

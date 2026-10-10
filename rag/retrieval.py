@@ -1,70 +1,172 @@
-import os
-from dotenv import load_dotenv
+from pathlib import Path
+from typing import Any
 
-# Vector Store and Embeddings
 from langchain_chroma import Chroma
 from langchain_openai import AzureOpenAIEmbeddings
 
-load_dotenv()
+from rag.config import (
+    COLLECTION_NAME,
+    VECTOR_STORE_DIRECTORY,
+    get_azure_embedding_settings,
+)
 
-# Deterministic paths based on the project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Option A: Always use the project-relative default (No os.getenv needed)
-DB_DIR = os.path.join(BASE_DIR, 'rag', 'vector_store')
-
-# Priority 4 Fix: Renamed function to reflect broader operational knowledge
-def retrieve_operational_knowledge(query: str, k: int = 3) -> list:
+class RAGRetrievalError(RuntimeError):
     """
-    Queries the Chroma vector database for operational procedures 
-    and returns structured document chunks with source metadata.
+    Raised when operational knowledge cannot be retrieved.
     """
-    print(f"🔎 Searching the knowledge base for: '{query}'")
-    
-    # Priority 2 Fix: INITIALIZE THE AZURE EMBEDDING MODEL
-    # This must perfectly match the model used in ingestion.py to ensure vector alignment
-    embeddings = AzureOpenAIEmbeddings(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2023-05-15"),
-        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+
+
+def create_embeddings() -> AzureOpenAIEmbeddings:
+    """
+    Create the same embedding client used during ingestion.
+    """
+    embedding_settings = (
+        get_azure_embedding_settings()
     )
-    
-    # 2. LOAD THE DATABASE
+
+    return AzureOpenAIEmbeddings(
+        **embedding_settings,
+    )
+
+
+def load_vector_store() -> Chroma:
+    """
+    Load the persistent Chroma collection used by ingestion.
+    """
+    if not VECTOR_STORE_DIRECTORY.exists():
+        raise RAGRetrievalError(
+            "The RAG vector store does not exist at "
+            f"'{VECTOR_STORE_DIRECTORY}'. "
+            "Run the ingestion process first."
+        )
+
+    embeddings = create_embeddings()
+
     try:
         vector_store = Chroma(
-            persist_directory=DB_DIR, 
-            embedding_function=embeddings
+            persist_directory=str(
+                VECTOR_STORE_DIRECTORY
+            ),
+            embedding_function=embeddings,
+            collection_name=COLLECTION_NAME,
         )
-    except Exception as e:
-        print(f"Error loading database: {e}")
-        return []
-    
-    # 3. PERFORM SIMILARITY SEARCH
-    results = vector_store.similarity_search(query, k=k)
-    
-    if not results:
-        print("No relevant company policies found for this query.")
-        return []
-    
-    # Priority 5 Fix: FORMAT THE CONTEXT AS STRUCTURED METADATA
-    # Returns a list of dictionaries so the Agent knows which file it is quoting
+    except Exception as exc:
+        raise RAGRetrievalError(
+            "Unable to load the RAG vector store: "
+            f"{exc}"
+        ) from exc
+
+    stored_chunks = (
+        vector_store._collection.count()
+    )
+
+    if stored_chunks == 0:
+        raise RAGRetrievalError(
+            "The RAG collection exists but contains no chunks. "
+            "Run the ingestion process first."
+        )
+
+    return vector_store
+
+
+def retrieve_operational_knowledge(
+    query: str,
+    k: int = 3,
+) -> list[dict[str, Any]]:
+    """
+    Retrieve operational knowledge using semantic similarity.
+
+    Returns structured chunks containing content, source information,
+    metadata, and a relevance score.
+    """
+    normalized_query = query.strip()
+
+    if not normalized_query:
+        raise ValueError(
+            "The RAG retrieval query cannot be empty."
+        )
+
+    if k < 1:
+        raise ValueError(
+            "The number of retrieval results must be at least 1."
+        )
+
+    vector_store = load_vector_store()
+
+    try:
+        results = (
+            vector_store
+            .similarity_search_with_relevance_scores(
+                normalized_query,
+                k=k,
+            )
+        )
+    except Exception as exc:
+        raise RAGRetrievalError(
+            "Operational knowledge retrieval failed: "
+            f"{exc}"
+        ) from exc
+
     structured_results = []
-    for doc in results:
-        structured_results.append({
-            "content": doc.page_content,
-            "source": doc.metadata.get("source", "Unknown file")
-        })
-        
+
+    for rank, result in enumerate(
+        results,
+        start=1,
+    ):
+        document, relevance_score = result
+
+        source = document.metadata.get(
+            "source",
+            "Unknown source",
+        )
+
+        source_path = document.metadata.get(
+            "source_path",
+            source,
+        )
+
+        structured_results.append(
+            {
+                "rank": rank,
+                "content": document.page_content,
+                "source": source,
+                "source_path": source_path,
+                "relevance_score": float(
+                    relevance_score
+                ),
+                "metadata": dict(
+                    document.metadata
+                ),
+            }
+        )
+
     return structured_results
 
+
 if __name__ == "__main__":
-    # Priority 6 Fix: Updated Test execution for the new function name and data structure
-    test_query = "What should we do when a shipment is at high risk of delay?"
-    answers = retrieve_operational_knowledge(test_query)
-    
+    test_query = (
+        "What should operations do when a shipment has a high "
+        "risk of delay?"
+    )
+
+    answers = retrieve_operational_knowledge(
+        test_query,
+        k=3,
+    )
+
     print("\n=== RETRIEVED KNOWLEDGE ===\n")
-    for i, ans in enumerate(answers, 1):
-        print(f"--- Result {i} ---")
-        print(f"Source: {ans['source']}")
-        print(f"Content: {ans['content']}\n")
+
+    for answer in answers:
+        print(
+            f"--- Result {answer['rank']} ---"
+        )
+        print(
+            f"Source: {answer['source']}"
+        )
+        print(
+            "Relevance: "
+            f"{answer['relevance_score']:.4f}"
+        )
+        print(answer["content"])
+        print()

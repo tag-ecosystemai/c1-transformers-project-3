@@ -7,6 +7,7 @@ from backend.models.schemas import ShipmentResponse
 from backend.services import agent_tools
 from backend.services.agent_tools import (
     WEATHER_WINDOW_BASIS,
+    get_alternative_suppliers,
     get_delay_risk,
     get_destination_weather,
     get_historical_delay_context,
@@ -66,6 +67,8 @@ def test_get_historical_delay_context_reports_recorded_rates(shipment):
             "shipping_mode": 0.38,
         },
         "highest_delay_rate_factor": "product",
+        "highest_delay_rate": 0.57,
+        "source": "shipment_tool_data.csv",
     }
 
 
@@ -140,6 +143,35 @@ def test_get_destination_weather_rejects_unmapped_country(shipment):
 
     with pytest.raises(WeatherServiceError, match="Atlantis"):
         get_destination_weather(shipment)
+
+
+def test_get_alternative_suppliers_returns_synthetic_candidates(
+    shipment,
+):
+    result = (
+        get_alternative_suppliers(
+            shipment=shipment,
+            limit=3,
+        )
+    )
+
+    assert result.alternatives
+
+    assert (
+        result.data_source
+        == "SYNTHETIC_MVP"
+    )
+
+    assert (
+        result.quantity_capacity_verified
+        is False
+    )
+
+    for supplier in result.alternatives:
+        assert (
+            supplier.data_source
+            == "SYNTHETIC_MVP"
+        )
 
 
 def test_get_inventory_coverage_looks_up_the_shipment_product(

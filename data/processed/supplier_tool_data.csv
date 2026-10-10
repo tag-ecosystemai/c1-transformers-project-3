@@ -1,0 +1,61 @@
+supplier_id,supplier_name,supplier_country,product_category,average_lead_time_days,on_time_delivery_rate,cancellation_rate,quality_issue_rate,capacity_utilization,supplier_risk_score,supplier_risk_level,data_source
+SUP001,Global Supply Partners,Papúa Nueva Guinea,Music,9.6,0.97,0.082,0.031,0.544,14.34,MEDIUM,SYNTHETIC_MVP
+SUP001,Global Supply Partners,Papúa Nueva Guinea,Hockey,9.6,0.97,0.082,0.031,0.544,14.34,MEDIUM,SYNTHETIC_MVP
+SUP001,Global Supply Partners,Papúa Nueva Guinea,Fitness Accessories,9.6,0.97,0.082,0.031,0.544,14.34,MEDIUM,SYNTHETIC_MVP
+SUP002,Apex Distribution,China,CDs ,3.6,0.899,0.08,0.052,0.917,25.02,HIGH,SYNTHETIC_MVP
+SUP002,Apex Distribution,China,Men's Clothing,3.6,0.899,0.08,0.052,0.917,25.02,HIGH,SYNTHETIC_MVP
+SUP002,Apex Distribution,China,Kids' Golf Clubs,3.6,0.899,0.08,0.052,0.917,25.02,HIGH,SYNTHETIC_MVP
+SUP003,NorthStar Logistics,Bután,Women's Golf Clubs,8.5,0.877,0.088,0.066,0.584,19.68,MEDIUM,SYNTHETIC_MVP
+SUP003,NorthStar Logistics,Bután,Sporting Goods,8.5,0.877,0.088,0.066,0.584,19.68,MEDIUM,SYNTHETIC_MVP
+SUP003,NorthStar Logistics,Bután,DVDs,8.5,0.877,0.088,0.066,0.584,19.68,MEDIUM,SYNTHETIC_MVP
+SUP004,Prime Source Trading,Pakistán,Baby ,3.9,0.741,0.051,0.079,0.609,25.14,HIGH,SYNTHETIC_MVP
+SUP004,Prime Source Trading,Pakistán,Women's Golf Clubs,3.9,0.741,0.051,0.079,0.609,25.14,HIGH,SYNTHETIC_MVP
+SUP004,Prime Source Trading,Pakistán,Video Games,3.9,0.741,0.051,0.079,0.609,25.14,HIGH,SYNTHETIC_MVP
+SUP005,Vertex Supply Co,Alemania,Camping & Hiking,3.4,0.975,0.054,0.028,0.948,21.6,HIGH,SYNTHETIC_MVP
+SUP005,Vertex Supply Co,Alemania,Pet Supplies,3.4,0.975,0.054,0.028,0.948,21.6,HIGH,SYNTHETIC_MVP
+SUP005,Vertex Supply Co,Alemania,Hockey,3.4,0.975,0.054,0.028,0.948,21.6,HIGH,SYNTHETIC_MVP
+SUP006,BlueWave Suppliers,Suecia,Fitness Accessories,2.7,0.803,0.03,0.027,0.938,27.78,HIGH,SYNTHETIC_MVP
+SUP006,BlueWave Suppliers,Suecia,Men's Clothing,2.7,0.803,0.03,0.027,0.938,27.78,HIGH,SYNTHETIC_MVP
+SUP006,BlueWave Suppliers,Suecia,Basketball,2.7,0.803,0.03,0.027,0.938,27.78,HIGH,SYNTHETIC_MVP
+SUP007,Atlas Commerce,Bélgica,Baseball & Softball,9.0,0.907,0.071,0.059,0.662,19.56,MEDIUM,SYNTHETIC_MVP
+SUP007,Atlas Commerce,Bélgica,Basketball,9.0,0.907,0.071,0.059,0.662,19.56,MEDIUM,SYNTHETIC_MVP
+SUP007,Atlas Commerce,Bélgica,Crafts,9.0,0.907,0.071,0.059,0.662,19.56,MEDIUM,SYNTHETIC_MVP
+SUP008,Meridian Goods,Camboya,Kids' Golf Clubs,7.6,0.739,0.018,0.078,0.822,28.8,HIGH,SYNTHETIC_MVP
+SUP008,Meridian Goods,Camboya,Computers,7.6,0.739,0.018,0.078,0.822,28.8,HIGH,SYNTHETIC_MVP
+SUP008,Meridian Goods,Camboya,Video Games,7.6,0.739,0.018,0.078,0.822,28.8,HIGH,SYNTHETIC_MVP
+SUP009,Pacific Supply Group,Grecia,Women's Apparel,9.6,0.948,0.03,0.011,0.92,21.3,HIGH,SYNTHETIC_MVP
+SUP009,Pacific Supply Group,Grecia,Toys,9.6,0.948,0.03,0.011,0.92,21.3,HIGH,SYNTHETIC_MVP
+SUP009,Pacific Supply Group,Grecia,Water Sports,9.6,0.948,0.03,0.011,0.92,21.3,HIGH,SYNTHETIC_MVP
+SUP010,EuroTrade Partners,Corea del Sur,Crafts,8.5,0.779,0.016,0.059,0.783,26.0,HIGH,SYNTHETIC_MVP
+SUP010,EuroTrade Partners,Corea del Sur,DVDs,8.5,0.779,0.016,0.059,0.783,26.0,HIGH,SYNTHETIC_MVP
+SUP010,EuroTrade Partners,Corea del Sur,Toys,8.5,0.779,0.016,0.059,0.783,26.0,HIGH,SYNTHETIC_MVP
+SUP011,Summit Distribution,Camboya,Boxing & MMA,7.4,0.911,0.08,0.065,0.541,17.28,MEDIUM,SYNTHETIC_MVP
+SUP011,Summit Distribution,Camboya,Pet Supplies,7.4,0.911,0.08,0.065,0.541,17.28,MEDIUM,SYNTHETIC_MVP
+SUP011,Summit Distribution,Camboya,Men's Golf Clubs,7.4,0.911,0.08,0.065,0.541,17.28,MEDIUM,SYNTHETIC_MVP
+SUP012,Horizon Suppliers,Taiwán,Trade-In,5.4,0.954,0.016,0.044,0.505,13.14,MEDIUM,SYNTHETIC_MVP
+SUP012,Horizon Suppliers,Taiwán,Health and Beauty,5.4,0.954,0.016,0.044,0.505,13.14,MEDIUM,SYNTHETIC_MVP
+SUP012,Horizon Suppliers,Taiwán,Music,5.4,0.954,0.016,0.044,0.505,13.14,MEDIUM,SYNTHETIC_MVP
+SUP013,Continental Source,Tailandia,Toys,2.9,0.794,0.021,0.055,0.675,23.26,HIGH,SYNTHETIC_MVP
+SUP013,Continental Source,Tailandia,Golf Apparel,2.9,0.794,0.021,0.055,0.675,23.26,HIGH,SYNTHETIC_MVP
+SUP013,Continental Source,Tailandia,Crafts,2.9,0.794,0.021,0.055,0.675,23.26,HIGH,SYNTHETIC_MVP
+SUP014,Nova Supply,Tailandia,Cardio Equipment,7.5,0.85,0.076,0.074,0.763,24.26,HIGH,SYNTHETIC_MVP
+SUP014,Nova Supply,Tailandia,Fishing,7.5,0.85,0.076,0.074,0.763,24.26,HIGH,SYNTHETIC_MVP
+SUP014,Nova Supply,Tailandia,Music,7.5,0.85,0.076,0.074,0.763,24.26,HIGH,SYNTHETIC_MVP
+SUP015,Enterprise Trade Group,Singapur,Pet Supplies,6.4,0.725,0.074,0.048,0.703,27.5,HIGH,SYNTHETIC_MVP
+SUP015,Enterprise Trade Group,Singapur,Video Games,6.4,0.725,0.074,0.048,0.703,27.5,HIGH,SYNTHETIC_MVP
+SUP015,Enterprise Trade Group,Singapur,Men's Clothing,6.4,0.725,0.074,0.048,0.703,27.5,HIGH,SYNTHETIC_MVP
+SUP016,DirectSource Global,Noruega,Men's Footwear,2.3,0.854,0.056,0.035,0.902,25.7,HIGH,SYNTHETIC_MVP
+SUP016,DirectSource Global,Noruega,Men's Golf Clubs,2.3,0.854,0.056,0.035,0.902,25.7,HIGH,SYNTHETIC_MVP
+SUP016,DirectSource Global,Noruega,Cameras ,2.3,0.854,0.056,0.035,0.902,25.7,HIGH,SYNTHETIC_MVP
+SUP017,Unified Suppliers,Dinamarca,Crafts,3.7,0.792,0.016,0.072,0.767,25.42,HIGH,SYNTHETIC_MVP
+SUP017,Unified Suppliers,Dinamarca,Women's Golf Clubs,3.7,0.792,0.016,0.072,0.767,25.42,HIGH,SYNTHETIC_MVP
+SUP017,Unified Suppliers,Dinamarca,Garden,3.7,0.792,0.016,0.072,0.767,25.42,HIGH,SYNTHETIC_MVP
+SUP018,Optima Distribution,Alemania,Golf Apparel,6.5,0.86,0.032,0.064,0.584,19.2,MEDIUM,SYNTHETIC_MVP
+SUP018,Optima Distribution,Alemania,Women's Clothing,6.5,0.86,0.032,0.064,0.584,19.2,MEDIUM,SYNTHETIC_MVP
+SUP018,Optima Distribution,Alemania,Golf Gloves,6.5,0.86,0.032,0.064,0.584,19.2,MEDIUM,SYNTHETIC_MVP
+SUP019,Pioneer Supply,Alemania,Men's Clothing,7.8,0.963,0.022,0.015,0.834,18.9,MEDIUM,SYNTHETIC_MVP
+SUP019,Pioneer Supply,Alemania,Golf Shoes,7.8,0.963,0.022,0.015,0.834,18.9,MEDIUM,SYNTHETIC_MVP
+SUP019,Pioneer Supply,Alemania,Fitness Accessories,7.8,0.963,0.022,0.015,0.834,18.9,MEDIUM,SYNTHETIC_MVP
+SUP020,GlobalLink Trading,India,Women's Clothing,7.5,0.747,0.088,0.045,0.834,29.46,HIGH,SYNTHETIC_MVP
+SUP020,GlobalLink Trading,India,Toys,7.5,0.747,0.088,0.045,0.834,29.46,HIGH,SYNTHETIC_MVP
+SUP020,GlobalLink Trading,India,Cameras ,7.5,0.747,0.088,0.045,0.834,29.46,HIGH,SYNTHETIC_MVP

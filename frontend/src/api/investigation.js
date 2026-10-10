@@ -1,256 +1,1484 @@
-// Consumes the backend's investigation stream (Server-Sent Events) and turns
-// each event into the shipment fields the components use.
+// Consumes the backend investigation stream and converts its events
+// into the frontend shipment fields used by React components.
+
+import {
+  apiUrl,
+} from "./base.js";
+
 const NA = "Not available";
+const FAILED = "Investigation failed";
+
+
+
 
 export class ApiError extends Error {
-  // code is the backend's failure code, when it reported one.
-  constructor(status, message, detail, code) {
+  constructor(
+    status,
+    message,
+    detail,
+    code,
+  ) {
     super(message);
+
+    this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.code = code;
   }
 }
 
-const FAILED = "Investigation failed";
-// User-facing text for the backend's failure codes and HTTP statuses.
+
 const MESSAGES = {
-  investigation_not_required: "Low risk — no investigation needed",
-  shipment_not_found: "Shipment not found",
-  404: "Shipment not found",
+  investigation_not_required:
+    "Low risk — no investigation needed",
+
+  shipment_not_found:
+    "Shipment not found",
+
+  investigation_failed:
+    "Investigation failed",
+
+  404:
+    "Shipment not found",
 };
-const messageFor = (code, status) => MESSAGES[code] || MESSAGES[status] || FAILED;
 
-const malformed = () => new ApiError(0, FAILED, "The server sent a response that could not be understood.");
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
-// Yields { event, data } for each complete event in an SSE response body.
-// An event cut off by the end of the stream is dropped, not yielded.
-async function* readEvents(body) {
+const messageFor = (
+  code,
+  status,
+) => (
+  MESSAGES[code]
+  || MESSAGES[status]
+  || FAILED
+);
+
+
+const malformed = () =>
+  new ApiError(
+    0,
+    FAILED,
+    (
+      "The server sent a response "
+      + "that could not be understood."
+    ),
+  );
+
+
+const isObject = (
+  value,
+) => (
+  value !== null
+  && typeof value === "object"
+  && !Array.isArray(value)
+);
+
+
+const capitalize = (
+  value,
+) => {
+  const text = String(
+    value ?? "",
+  )
+    .replace(/_/g, " ")
+    .toLowerCase();
+
+  return (
+    text.charAt(0).toUpperCase()
+    + text.slice(1)
+  );
+};
+
+
+const percent = (
+  probability,
+) => {
+  const value = Number(
+    probability,
+  );
+
+  if (!Number.isFinite(value)) {
+    return NA;
+  }
+
+  return `${(
+    value * 100
+  ).toFixed(1)}%`;
+};
+
+
+async function* readEvents(
+  body,
+) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
+
   let buffer = "";
+
   try {
     for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
-      let end;
-      while ((end = buffer.indexOf("\n\n")) !== -1) {
-        const block = buffer.slice(0, end);
-        buffer = buffer.slice(end + 2);
+      const {
+        value,
+        done,
+      } = await reader.read();
+
+      if (done) {
+        return;
+      }
+
+      buffer = (
+        buffer
+        + decoder.decode(
+          value,
+          {
+            stream: true,
+          },
+        )
+      ).replace(
+        /\r\n/g,
+        "\n",
+      );
+
+      let eventEnd;
+
+      while (
+        (
+          eventEnd = buffer.indexOf(
+            "\n\n",
+          )
+        ) !== -1
+      ) {
+        const block = buffer.slice(
+          0,
+          eventEnd,
+        );
+
+        buffer = buffer.slice(
+          eventEnd + 2,
+        );
+
         let event = "message";
-        const data = [];
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        const dataLines = [];
+
+        for (
+          const line
+          of block.split("\n")
+        ) {
+          if (
+            line.startsWith("event:")
+          ) {
+            event = line
+              .slice(6)
+              .trim();
+          } else if (
+            line.startsWith("data:")
+          ) {
+            dataLines.push(
+              line
+                .slice(5)
+                .replace(/^ /, ""),
+            );
+          }
         }
-        // Blocks without data are comments or keep-alives.
-        if (data.length) yield { event, data: data.join("\n") };
+
+        // Ignore comments and keep-alive blocks.
+        if (dataLines.length) {
+          yield {
+            event,
+            data: dataLines.join("\n"),
+          };
+        }
       }
     }
   } finally {
-    // Stops the download when the caller finishes early.
-    reader.cancel().catch(() => {});
+    reader
+      .cancel()
+      .catch(() => {});
   }
 }
 
-// A failed tool call keeps its status, and its error replaces the output.
-const toEvidence = (t) => ({
-  tool: t.tool ?? t.name,
-  input: t.input,
-  output: t.status === "error" ? t.error : t.output,
-  status: t.status,
+
+const toEvidence = (
+  toolCall,
+) => ({
+  tool:
+    toolCall.tool
+    ?? toolCall.name,
+
+  input:
+    toolCall.input
+    ?? {},
+
+  output:
+    toolCall.status === "error"
+      ? toolCall.error
+      : toolCall.output,
+
+  status:
+    toolCall.status,
 });
 
-// The backend lists this limitation while its recommended actions are fixed
-// placeholders rather than retrieved from the operational knowledge base.
-const PLACEHOLDER_ACTIONS = /RAG retrieval is not yet integrated/i;
-export const RECOMMENDATIONS_PENDING =
-  "Approved operational recommendations will appear when the knowledge base is connected.";
 
-const capitalize = (v) => { const t = String(v).replace(/_/g, " ").toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
-const percent = (p) => `${(p * 100).toFixed(1)}%`;
+const uniqueStrings = (
+  values,
+) => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
 
-// The shipment fields for a finished briefing (the done event's payload).
-function toResult(b) {
-  if (!isObject(b) || typeof b.shipment_id !== "string" || typeof b.risk_level !== "string"
-    || typeof b.delay_probability !== "number" || typeof b.summary !== "string"
-    || !isObject(b.evidence) || !Array.isArray(b.tool_trace)
-    || !Array.isArray(b.recommended_actions) || !Array.isArray(b.limitations)) throw malformed();
-  const cause = [b.evidence.historical_delay_summary, b.evidence.weather_summary]
-    .filter(Boolean).join(" ");
-  // Placeholder actions, and the summary that cites them as policy, are not
-  // shown as if the knowledge base had produced them.
-  const pending = b.limitations.some((l) => PLACEHOLDER_ACTIONS.test(l));
-  const actions = pending ? [] : b.recommended_actions;
-  const summary = pending
-    ? `Shipment ${b.shipment_id} has a ${b.risk_level.toLowerCase()} risk of delay (${percent(b.delay_probability)} probability).`
-    : b.summary;
+  return [
+    ...new Set(
+      values
+        .filter(
+          (value) =>
+            typeof value === "string"
+            && value.trim(),
+        )
+        .map(
+          (value) =>
+            value.trim(),
+        ),
+    ),
+  ];
+};
+
+
+const citationTitle = (
+  filename,
+) => String(
+  filename,
+)
+  .replace(
+    /\.pdf$/i,
+    "",
+  )
+  .replace(
+    /^\d+_/,
+    "",
+  )
+  .replace(
+    /_/g,
+    " ",
+  )
+  .replace(
+    /\b\w/g,
+    (character) =>
+      character.toUpperCase(),
+  );
+
+const frontendText = (
+  value,
+) => String(
+  value ?? "",
+)
+  .replace(
+    /\bsynthetic\s+/gi,
+    "",
+  )
+  .replace(
+    /\b(?:supplier|inventory) records are demonstration data(?: and)?\.?\s*/gi,
+    "",
+  )
+  .replace(
+    /\s{2,}/g,
+    " ",
+  )
+  .trim();
+
+ const visibleLimitations = (
+  values,
+) => uniqueStrings(
+  values,
+)
+  .filter(
+    (limitation) => (
+      !(
+        /supplier records, inventory records/i.test(
+          limitation,
+        )
+        && /operational procedures/i.test(
+          limitation,
+        )
+        && /demonstration data/i.test(
+          limitation,
+        )
+      )
+    ),
+  )
+  .map(
+    frontendText,
+  );
+
+const toRecommendation = (
+  action,
+  index,
+  shipmentId,
+  documentsRetrieved,
+) => ({
+  id:
+    `${shipmentId}-${index + 1}`,
+
+  title:
+    frontendText(
+      action,
+    ),
+
+  // A recommendation only claims retrieved guidance when supporting
+  // documents were actually retrieved for the briefing.
+  detail:
+    documentsRetrieved
+      ? (
+        "Generated from the collected "
+        + "evidence and retrieved "
+        + "operational guidance."
+      )
+      : (
+        "Generated from the collected "
+        + "evidence only. No supporting "
+        + "documents were retrieved."
+      ),
+
+  cost:
+    null,
+
+  time:
+    null,
+
+  risk:
+    null,
+
+  source:
+    documentsRetrieved
+      ? "Grounded disruption briefing"
+      : "Evidence-only disruption briefing",
+});
+
+
+// The limitation the backend reports when supporting documents could
+// not be retrieved at all. Any other briefing without citations is one
+// whose search found nothing to cite.
+const RETRIEVAL_UNAVAILABLE =
+  /supporting document retrieval was unavailable/i;
+
+export const RETRIEVAL_NOTICES = {
+  unavailable: {
+    title:
+      "Supporting documents unavailable",
+
+    message:
+      (
+        "Supporting documents could not be retrieved, so this "
+        + "briefing cites no operational procedures. It is based "
+        + "only on the evidence collected by the investigation."
+      ),
+  },
+
+  none: {
+    title:
+      "No supporting documents retrieved",
+
+    message:
+      (
+        "No supporting operational documents were retrieved for "
+        + "this shipment, so this briefing cites no operational "
+        + "procedures. It is based only on the evidence collected "
+        + "by the investigation."
+      ),
+  },
+};
+
+
+// Whether the briefing is supported by retrieved documents. Citations
+// are the only evidence of retrieval: an empty list is never reported
+// as a successful search.
+const toRetrieval = (
+  citations,
+  limitations,
+) => {
+  if (citations.length > 0) {
+    return {
+      status:
+        "retrieved",
+
+      title:
+        null,
+
+      message:
+        null,
+    };
+  }
+
+  const status = (
+    limitations.some(
+      (limitation) =>
+        RETRIEVAL_UNAVAILABLE.test(
+          limitation,
+        ),
+    )
+      ? "unavailable"
+      : "none"
+  );
+
   return {
-    riskLevel: b.risk_level.toLowerCase(),
-    delayProbability: b.delay_probability,
-    evidence: b.tool_trace.map(toEvidence),
-    conclusion: summary,
-    briefing: {
-      summary,
-      cause: cause || NA,
-      impact: "Not yet available",
-      actions: pending ? RECOMMENDATIONS_PENDING : actions.join(" "),
-      generatedAt: new Date().toLocaleString(),
+    status,
+    ...RETRIEVAL_NOTICES[status],
+  };
+};
+
+
+function validateDonePayload(
+  briefing,
+) {
+  if (
+    !isObject(briefing)
+    || typeof briefing.shipment_id
+      !== "string"
+    || typeof briefing.risk_level
+      !== "string"
+    || typeof briefing.delay_probability
+      !== "number"
+    || typeof briefing.summary
+      !== "string"
+    || !isObject(
+      briefing.evidence,
+    )
+    || !Array.isArray(
+      briefing.tool_trace,
+    )
+    || !Array.isArray(
+      briefing.recommended_actions,
+    )
+    || !Array.isArray(
+      briefing.rag_policy_citations,
+    )
+    || !Array.isArray(
+      briefing.limitations,
+    )
+  ) {
+    throw malformed();
+  }
+}
+
+// The product-level inventory record, as the backend reports it in
+// the trace of its inventory step. The record describes the product,
+// not the shipment: the backend sends no warehouse, supplier, reorder
+// point, replenishment date or destination match, and none is shown.
+const toInventoryRecord = (
+  toolTrace,
+) => {
+  const value = toolTrace.find(
+    (call) =>
+      (call.tool ?? call.name)
+        === "get_inventory_coverage"
+      && call.status === "success",
+  )?.output;
+
+  if (!isObject(value)) {
+    return null;
+  }
+
+  return {
+    productName:
+      value.product_name
+      ?? null,
+
+    currentStock:
+      value.current_stock
+      ?? null,
+
+    reservedStock:
+      value.reserved_stock
+      ?? null,
+
+    availableStock:
+      value.available_stock
+      ?? null,
+
+    dailyDemand:
+      value.daily_demand
+      ?? null,
+
+    safetyStock:
+      value.safety_stock
+      ?? null,
+
+    incomingQuantity:
+      value.incoming_quantity
+      ?? null,
+
+    inventoryCoverageDays:
+      value.inventory_coverage_days
+      ?? null,
+
+    stockoutRisk:
+      value.stockout_risk
+      ?? null,
+
+    belowSafetyStock:
+      value.below_safety_stock
+      ?? false,
+
+    limitation:
+      value.limitation
+      ?? null,
+  };
+};
+
+const formatDays = (
+  value,
+) => {
+  const numberValue = Number(
+    value,
+  );
+
+  if (!Number.isFinite(
+    numberValue,
+  )) {
+    return NA;
+  }
+
+  return `${numberValue.toLocaleString(
+    undefined,
+    {
+      maximumFractionDigits: 2,
     },
-    recommendations: actions.map((action, i) => ({
-      id: `${b.shipment_id}-${i}`,
-      title: action,
-      detail: "",
-      cost: null,
-      time: null,
-      risk: null,
-    })),
-    recommendationsPending: pending,
-    limitations: pending
-      ? [...b.limitations.filter((l) => !PLACEHOLDER_ACTIONS.test(l)), RECOMMENDATIONS_PENDING]
-      : b.limitations,
+  )} days`;
+};
+
+function toResult(
+  briefing,
+) {
+  validateDonePayload(
+    briefing,
+  );
+
+  const toolTrace = (
+    briefing.tool_trace
+      .map(toEvidence)
+  );
+
+  const inventoryRecord = (
+    toInventoryRecord(
+      briefing.tool_trace,
+    )
+  );
+
+  const structuredEvidence = {
+    shipmentSummary:
+      briefing.evidence
+        .shipment_summary
+      ?? null,
+
+    historicalDelaySummary:
+      briefing.evidence
+        .historical_delay_summary
+      ?? null,
+
+    weatherSummary:
+      briefing.evidence
+        .weather_summary
+      ?? null,
+
+    supplierStatus:
+      briefing.evidence
+        .supplier_status
+      ?? null,
+
+    inventorySummary:
+      briefing.evidence
+        .inventory_summary
+      ?? null,
+
+    inventoryRecord,
+
+    // The whole-day field stays empty when coverage is fractional, so
+    // the coverage on the record is preferred.
+    inventoryCoverageDays:
+      (
+        inventoryRecord
+          ?.inventoryCoverageDays
+        ?? briefing.evidence
+          .inventory_coverage_days
+        ?? null
+      ),
+  };
+
+  const cause = [
+    structuredEvidence
+      .historicalDelaySummary,
+
+    structuredEvidence
+      .weatherSummary,
+
+    structuredEvidence
+      .supplierStatus,
+
+    structuredEvidence
+      .inventorySummary,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const actions = uniqueStrings(
+    briefing.recommended_actions,
+  );
+
+  const citations = uniqueStrings(
+    briefing.rag_policy_citations,
+  );
+
+  const limitations = visibleLimitations(
+    briefing.limitations,
+  );
+
+  const retrieval = toRetrieval(
+    citations,
+    uniqueStrings(
+      briefing.limitations,
+    ),
+  );
+
+  const citationCards = citations.map(
+    (filename) => ({
+      filename,
+
+      title:
+        citationTitle(
+          filename,
+        ),
+
+      sourceType:
+        "Operational guidance",
+    }),
+  );
+
+  const recommendations = actions.map(
+    (
+      action,
+      index,
+    ) =>
+      toRecommendation(
+        action,
+        index,
+        briefing.shipment_id,
+        retrieval.status === "retrieved",
+      ),
+  );
+
+  const inventoryImpact = (
+    inventoryRecord
+  )
+    ? (
+      `${formatDays(
+        inventoryRecord
+          .inventoryCoverageDays,
+      )} of coverage on the product's inventory record`
+      + ` · ${capitalize(
+        inventoryRecord
+          .stockoutRisk,
+      )} stockout risk on record`
+      + ` · ${inventoryRecord
+        .availableStock} units available.`
+      + " Stock availability for this shipment "
+      + "has not been verified."
+    )
+    : (
+      structuredEvidence
+        .inventorySummary
+      ?? (
+        structuredEvidence
+          .inventoryCoverageDays
+        !== null
+          ? (
+            "Inventory coverage is "
+            + formatDays(
+              structuredEvidence
+                .inventoryCoverageDays,
+            )
+            + "."
+          )
+          : (
+            "Inventory impact cannot be "
+            + "confirmed because no inventory "
+            + "record is available."
+          )
+      )
+    );
+
+  return {
+    shipmentId:
+      briefing.shipment_id,
+
+    riskLevel:
+      briefing.risk_level
+        .toLowerCase(),
+
+    delayProbability:
+      briefing.delay_probability,
+
+    requiresInvestigation:
+      true,
+
+    investigationStatus:
+      "complete",
+
+    // Compatibility field used by the current Investigation component.
+    evidence:
+      toolTrace,
+
+    toolTrace,
+
+    structuredEvidence,
+
+    conclusion:
+      frontendText(
+        briefing.summary,
+      ),
+
+    briefing: {
+      summary:
+        frontendText(
+          briefing.summary,
+        ),
+
+      cause:
+        cause || NA,
+
+      impact:
+        inventoryImpact,
+
+      actions:
+        actions
+          .map(frontendText)
+          .join(" "),
+
+      recommendedActions:
+        actions.map(
+          frontendText,
+        ),
+
+      citations,
+
+      citationCards,
+
+      limitations,
+
+      retrieval,
+
+      generatedAt:
+        new Date()
+          .toLocaleString(),
+    },
+
+    recommendations,
+
+    recommendedActions:
+      actions.map(
+        frontendText,
+      ),
+
+    recommendationsPending:
+      false,
+
+    ragPolicyCitations:
+      citations,
+
+    citationCards,
+
+    limitations,
+
+    retrieval,
+
+    rawBriefing:
+      briefing,
   };
 }
 
-// The low-risk explanation, worded from the risk result the stream delivered
-// before the rejection. Null when that result is missing.
-function lowRiskDetail(evidence) {
-  const risk = evidence.find((e) => e.tool === "get_delay_risk" && e.status === "success")?.output;
-  if (typeof risk?.shipment_id !== "string" || typeof risk.delay_probability !== "number") return null;
-  return `Shipment ${risk.shipment_id} has a low risk of delay (${percent(risk.delay_probability)}) and does not require further investigation.`;
+
+function lowRiskDetail(
+  evidence,
+) {
+  const risk = evidence.find(
+    (item) =>
+      item.tool === "get_delay_risk"
+      && item.status === "success",
+  )?.output;
+
+  if (
+    typeof risk?.shipment_id
+      !== "string"
+    || typeof risk
+      ?.delay_probability
+      !== "number"
+  ) {
+    return null;
+  }
+
+  return (
+    `Shipment ${risk.shipment_id} `
+    + "has a low risk of delay "
+    + `(${percent(
+      risk.delay_probability,
+    )}) and does not require `
+    + "further investigation."
+  );
 }
 
-// Runs the backend investigation. onUpdate receives the shipment fields to
-// merge as each event arrives. Resolves only when a valid done event was
-// received; every other outcome throws ApiError with a user-facing message.
-// An aborted signal rejects with the fetch AbortError instead.
-export async function investigate(id, onUpdate, { signal, fetch: fetchFn = fetch } = {}) {
-  let res;
-  try {
-    res = await fetchFn(`/api/agent/investigate/${encodeURIComponent(id)}/stream`, {
-      headers: { Accept: "text/event-stream" },
-      signal,
-    });
-  } catch (e) {
-    if (signal?.aborted) throw e;
-    throw new ApiError(0, FAILED, "The backend could not be reached.");
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const detail = typeof body.detail === "string" ? body.detail : undefined;
-    throw new ApiError(res.status, messageFor(null, res.status), detail);
-  }
-  if (!res.body || !(res.headers.get("content-type") || "").includes("text/event-stream")) throw malformed();
 
-  // Tool calls so far, in order. The last entry is the one in progress.
+export async function investigate(
+  id,
+  onUpdate,
+  {
+    signal,
+    fetch: fetchFn = fetch,
+  } = {},
+) {
+  let response;
+
+  try {
+    response = await fetchFn(
+      apiUrl(
+        (
+          "/api/agent/investigate/"
+          + `${encodeURIComponent(id)}`
+          + "/stream"
+        ),
+      ),
+      {
+        method:
+          "GET",
+
+        headers: {
+          Accept:
+            "text/event-stream",
+        },
+
+        signal,
+      },
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+
+    throw new ApiError(
+      0,
+      FAILED,
+      "The backend could not be reached.",
+    );
+  }
+
+  if (!response.ok) {
+    const body = await response
+      .json()
+      .catch(() => ({}));
+
+    const detail = (
+      typeof body.detail === "string"
+        ? body.detail
+        : undefined
+    );
+
+    throw new ApiError(
+      response.status,
+      messageFor(
+        body.code,
+        response.status,
+      ),
+      detail,
+      body.code,
+    );
+  }
+
+  const contentType = (
+    response.headers.get(
+      "content-type",
+    )
+    || ""
+  );
+
+  if (
+    !response.body
+    || !contentType.includes(
+      "text/event-stream",
+    )
+  ) {
+    throw malformed();
+  }
+
   let evidence = [];
-  const finishTool = (data) => {
-    const call = toEvidence(data);
-    const last = evidence.length - 1;
-    evidence = evidence[last]?.tool === call.tool && evidence[last].status === "running"
-      ? [...evidence.slice(0, last), call] : [...evidence, call];
-    onUpdate({ evidence });
+
+  const update = (
+    patch,
+  ) => {
+    if (
+      typeof onUpdate
+      === "function"
+    ) {
+      onUpdate(patch);
+    }
+  };
+
+  const finishTool = (
+    data,
+  ) => {
+    const completedCall = (
+      toEvidence(
+        data,
+      )
+    );
+
+    const lastIndex = (
+      evidence.length - 1
+    );
+
+    const lastEntry = (
+      evidence[lastIndex]
+    );
+
+    if (
+      lastEntry?.tool
+        === completedCall.tool
+      && lastEntry.status
+        === "running"
+    ) {
+      evidence = [
+        ...evidence.slice(
+          0,
+          lastIndex,
+        ),
+        completedCall,
+      ];
+    } else {
+      evidence = [
+        ...evidence,
+        completedCall,
+      ];
+    }
+
+    update({
+      evidence,
+      toolTrace:
+        evidence,
+    });
   };
 
   try {
-    for await (const { event, data: raw } of readEvents(res.body)) {
+    for await (
+      const {
+        event,
+        data: rawData,
+      }
+      of readEvents(
+        response.body,
+      )
+    ) {
       let data;
-      try { data = JSON.parse(raw); } catch { throw malformed(); }
-      if (!isObject(data)) throw malformed();
 
-      if (event === "tool_start") {
-        if (typeof data.name !== "string") throw malformed();
-        evidence = [...evidence, { tool: data.name, input: data.input, status: "running" }];
-        onUpdate({ evidence });
-      } else if (event === "tool_complete" || event === "tool_error") {
-        if (typeof data.name !== "string") throw malformed();
-        finishTool({ ...data, status: event === "tool_error" ? "error" : "success" });
-      } else if (event === "message") {
-        if (typeof data.content !== "string") throw malformed();
-        onUpdate({ conclusion: data.content });
-      } else if (event === "done") {
-        const result = toResult(data);
-        onUpdate(result);
+      try {
+        data = JSON.parse(
+          rawData,
+        );
+      } catch {
+        throw malformed();
+      }
+
+      if (!isObject(data)) {
+        throw malformed();
+      }
+
+      if (
+        event === "tool_start"
+      ) {
+        if (
+          typeof data.name
+          !== "string"
+        ) {
+          throw malformed();
+        }
+
+        evidence = [
+          ...evidence,
+          {
+            tool:
+              data.name,
+
+            input:
+              data.input
+              ?? {},
+
+            status:
+              "running",
+          },
+        ];
+
+        update({
+          investigationStatus:
+            "running",
+
+          evidence,
+
+          toolTrace:
+            evidence,
+        });
+      } else if (
+        event === "tool_complete"
+        || event === "tool_error"
+      ) {
+        if (
+          typeof data.name
+          !== "string"
+        ) {
+          throw malformed();
+        }
+
+        finishTool({
+          ...data,
+
+          status:
+            event === "tool_error"
+              ? "error"
+              : "success",
+        });
+      } else if (
+        event === "message"
+      ) {
+        if (
+          typeof data.content
+          !== "string"
+        ) {
+          throw malformed();
+        }
+
+        update({
+          conclusion:
+            data.content,
+
+          investigationStatus:
+            "generating_briefing",
+        });
+      } else if (
+        event === "done"
+      ) {
+        const result = (
+          toResult(
+            data,
+          )
+        );
+
+        update(result);
+
         return result;
-      } else if (event === "error") {
-        const detail = typeof data.detail === "string" ? data.detail : undefined;
+      } else if (
+        event === "error"
+      ) {
+        const detail = (
+          typeof data.detail
+            === "string"
+            ? data.detail
+            : undefined
+        );
+
         throw new ApiError(
-          typeof data.status === "number" ? data.status : 0,
-          messageFor(data.code, data.status),
-          (data.code === "investigation_not_required" && lowRiskDetail(evidence)) || detail,
+          typeof data.status
+            === "number"
+            ? data.status
+            : 0,
+
+          messageFor(
+            data.code,
+            data.status,
+          ),
+
+          (
+            data.code
+              === "investigation_not_required"
+            && lowRiskDetail(
+              evidence,
+            )
+          )
+          || detail,
+
           data.code,
         );
       }
-      // Other event names are ignored so the backend can add new ones.
+
+      // Unknown event names are ignored so the backend can add
+      // new progress events without breaking older frontends.
     }
-  } catch (e) {
-    if (e instanceof ApiError || signal?.aborted) throw e;
-    throw new ApiError(0, FAILED, "The connection to the backend was lost.");
+  } catch (error) {
+    if (
+      error instanceof ApiError
+      || signal?.aborted
+    ) {
+      throw error;
+    }
+
+    throw new ApiError(
+      0,
+      FAILED,
+      (
+        "The connection to the "
+        + "backend was lost."
+      ),
+    );
   }
-  throw new ApiError(0, FAILED, "The connection closed before the investigation finished.");
+
+  throw new ApiError(
+    0,
+    FAILED,
+    (
+      "The connection closed before "
+      + "the investigation finished."
+    ),
+  );
 }
 
-// The explanation shown under a failure. The backend's detail is only shown
-// for outcomes it words for the user; other failures may carry internal error
-// text, so they get a neutral explanation. Status 0 details are written here.
-export function failureDetail(e) {
-  if (e.status === 0 || e.code === "investigation_not_required" || e.code === "shipment_not_found") return e.detail;
-  if (e.status === 404) return undefined;
-  return "Something went wrong while investigating this shipment. Please try again.";
+
+export function failureDetail(
+  error,
+) {
+  if (
+    error.status === 0
+    || error.code
+      === "investigation_not_required"
+    || error.code
+      === "shipment_not_found"
+  ) {
+    return error.detail;
+  }
+
+  if (error.status === 404) {
+    return undefined;
+  }
+
+  return (
+    "Something went wrong while "
+    + "investigating this shipment. "
+    + "Please try again."
+  );
 }
 
-const HIGHEST_FACTOR = { product: "Product", market: "Market", shipping_mode: "Shipping mode" };
 
-// How each investigation step is presented: a label, and a one-line finding
-// built from the step's result. Tool names and raw results are never shown.
+const HIGHEST_FACTOR = {
+  product:
+    "Product",
+
+  market:
+    "Market",
+
+  shipping_mode:
+    "Shipping mode",
+};
+
+
+const supplierFinding = (
+  output,
+) => {
+  const supplier = (
+    output?.recommended_supplier
+  );
+
+  if (!supplier) {
+    const candidateCount = Number(
+      output?.candidate_count,
+    );
+
+    if (
+      Number.isFinite(
+        candidateCount,
+      )
+      && candidateCount > 0
+    ) {
+      return (
+        `${candidateCount} comparison `
+        + (
+          candidateCount === 1
+            ? "candidate"
+            : "candidates"
+        )
+        + " found; human review required"
+      );
+    }
+
+    return (
+      "No suitable synthetic "
+      + "supplier candidate found"
+    );
+  }
+
+  return (
+    `${supplier.supplier_name} `
+    + `· ${supplier.supplier_country} `
+    + `· ${capitalize(
+      supplier.supplier_risk_level,
+    )} risk`
+  );
+};
+
+const inventoryFinding = (
+  output,
+) => {
+  if (!isObject(output)) {
+    return null;
+  }
+
+  const coverage = Number(
+    output.inventory_coverage_days,
+  );
+
+  const risk = capitalize(
+    output.stockout_risk,
+  );
+
+  if (!Number.isFinite(coverage)) {
+    return null;
+  }
+
+  // The record is product-level, so the finding says "on record"
+  // rather than describing stock for this shipment.
+  return (
+    `${formatDays(coverage)} coverage on record`
+    + ` · ${risk} stockout risk`
+  );
+};
+
 const STEPS = {
   get_delay_risk: {
-    label: "Assessing delay risk",
-    finding: (o) => `${capitalize(o.risk_level)} risk · ${percent(o.delay_probability)} probability`,
+    label:
+      "Assessing delay risk",
+
+    finding: (output) =>
+      (
+        `${capitalize(
+          output.risk_level,
+        )} risk · `
+        + `${percent(
+          output.delay_probability,
+        )} probability`
+      ),
   },
+
   get_shipment: {
-    label: "Checking shipment details",
-    finding: (o) => `${o.destination_city}, ${o.destination_country} · ${o.shipping_mode}`,
+    label:
+      "Checking shipment details",
+
+    finding: (output) =>
+      (
+        `${output.destination_city}, `
+        + `${output.destination_country} `
+        + `· ${output.shipping_mode}`
+      ),
   },
+
   get_historical_delay_context: {
-    label: "Reviewing historical delay patterns",
-    finding: (o) => `${HIGHEST_FACTOR[o.highest_delay_rate_factor]} has the highest historical delay rate`
-      + ` (${percent(o.historical_delay_rates[o.highest_delay_rate_factor])})`,
+    label:
+      "Reviewing historical delay patterns",
+
+    finding: (output) => {
+      const factor = (
+        output
+          .highest_delay_rate_factor
+      );
+
+      return (
+        `${HIGHEST_FACTOR[factor]} `
+        + "has the highest historical "
+        + "delay rate "
+        + `(${percent(
+          output
+            .historical_delay_rates[
+              factor
+            ],
+        )})`
+      );
+    },
   },
+
   get_destination_weather: {
-    label: "Checking destination weather",
-    finding: (o) => `${capitalize(o.worst_weather_description)} · ${capitalize(o.severity)} severity`,
+    label:
+      "Checking destination weather",
+
+    finding: (output) =>
+      (
+        `${capitalize(
+          output
+            .worst_weather_description,
+        )} · `
+        + `${capitalize(
+          output.severity,
+        )} severity`
+      ),
+  },
+
+  find_alternative_supplier: {
+    label:
+      "Checking alternative suppliers",
+
+    finding:
+      supplierFinding,
+  },
+  get_inventory_coverage: {
+    label:
+      "Checking the product inventory record",
+
+    finding:
+      inventoryFinding,
   },
 };
-const OTHER_STEP = { label: "Gathering additional evidence", finding: () => null };
 
-// A finding is only shown when the result has the expected fields.
-function findingFor(step, output) {
+
+const OTHER_STEP = {
+  label:
+    "Gathering additional evidence",
+
+  finding:
+    () => null,
+};
+
+
+function findingFor(
+  step,
+  output,
+) {
   try {
-    const text = step.finding(output);
-    return typeof text === "string" && !/undefined|null|NaN/.test(text) ? text : null;
+    const text = step.finding(
+      output,
+    );
+
+    if (
+      typeof text !== "string"
+      || /undefined|null|NaN/.test(
+        text,
+      )
+    ) {
+      return null;
+    }
+
+    return text;
   } catch {
     return null;
   }
 }
 
-// Steps for the investigation view: { label, finding, status }, where status
-// is "running", "done", "failed" or, for the closing step, "complete".
-export function toSteps(shipment) {
-  const running = shipment.investigationStatus === "running";
-  const steps = (shipment.evidence || []).map((e) => {
-    const step = Object.hasOwn(STEPS, e.tool) ? STEPS[e.tool] : OTHER_STEP;
-    if (e.status === "success") return { label: step.label, finding: findingFor(step, e.output), status: "done" };
-    if (e.status === "running" && running) return { label: step.label, finding: null, status: "running" };
-    // Failed, or still in progress when the investigation stopped.
-    return { label: step.label, finding: "This information could not be retrieved.", status: "failed" };
-  });
+
+export function toSteps(
+  shipment,
+) {
+  const running = (
+    shipment.investigationStatus
+      === "running"
+    || shipment.investigationStatus
+      === "generating_briefing"
+  );
+
+  const toolTrace = (
+    shipment.toolTrace
+    || shipment.evidence
+    || []
+  );
+
+  const steps = toolTrace.map(
+    (entry) => {
+      const step = (
+        Object.hasOwn(
+          STEPS,
+          entry.tool,
+        )
+      )
+        ? STEPS[entry.tool]
+        : OTHER_STEP;
+
+      if (
+        entry.status === "success"
+      ) {
+        return {
+          tool:
+            entry.tool,
+
+          label:
+            step.label,
+
+          finding:
+            findingFor(
+              step,
+              entry.output,
+            ),
+
+          status:
+            "done",
+        };
+      }
+
+      if (
+        entry.status === "running"
+        && running
+      ) {
+        return {
+          tool:
+            entry.tool,
+
+          label:
+            step.label,
+
+          finding:
+            null,
+
+          status:
+            "running",
+        };
+      }
+
+      return {
+        tool:
+          entry.tool,
+
+        label:
+          step.label,
+
+        finding:
+          (
+            "This information could "
+            + "not be retrieved."
+          ),
+
+        status:
+          "failed",
+      };
+    },
+  );
+
   if (shipment.briefing) {
-    steps.push({ label: "Investigation complete", finding: shipment.briefing.summary, status: "complete" });
-  } else if (shipment.conclusion && running) {
-    steps.push({ label: "Preparing briefing", finding: null, status: "running" });
+    steps.push({
+      tool:
+        "generate_briefing",
+
+      label:
+        "Generating disruption briefing",
+
+      finding:
+        shipment.briefing.summary,
+
+      status:
+        "complete",
+    });
+  } else if (
+    shipment.investigationStatus
+      === "generating_briefing"
+  ) {
+    steps.push({
+      tool:
+        "generate_briefing",
+
+      label:
+        "Generating disruption briefing",
+
+      finding:
+        null,
+
+      status:
+        "running",
+    });
   }
+
   return steps;
 }
