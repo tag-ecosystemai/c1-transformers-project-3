@@ -101,6 +101,9 @@ data/processed/*
 # Keep the approved Shipment Tool dataset
 !data/processed/shipment_tool_data.csv
 
+# Keep the synthetic Inventory Tool dataset
+!data/processed/inventory_tool_data.csv
+
 # Keep the existing processed project datasets
 !data/processed/df_model.zip
 !data/processed/df_clean.zip

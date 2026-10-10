@@ -9,7 +9,12 @@ recalculated here.
 from datetime import timedelta
 from typing import Any
 
-from backend.models.schemas import PredictionResponse, ShipmentResponse
+from backend.models.schemas import (
+    InventoryStatusResponse,
+    PredictionResponse,
+    ShipmentResponse,
+)
+from backend.services.inventory_service import get_inventory_status
 from backend.services.prediction_service import predict_delay_risk
 from backend.services.shipment_service import get_shipment_by_id
 from backend.services.weather_service import (
@@ -150,3 +155,27 @@ def get_destination_weather(
         "severity": classify_weather_severity(worst_code),
         "source": "Open-Meteo historical archive",
     }
+
+
+# ============================================================
+# INVENTORY TOOL
+# ============================================================
+
+
+def get_inventory_coverage(
+    shipment: ShipmentResponse,
+) -> InventoryStatusResponse:
+    """
+    Report the synthetic inventory record held for the shipment's
+    product, matched on the exact product name.
+
+    The record describes the product, not the shipment: it does not
+    show that stock is available to fulfil this shipment, and its
+    warehouse and supplier are unrelated to the shipment.
+
+    Raises InventoryServiceError when the inventory cannot be read or
+    matched, and its subclass InventoryNotFoundError when the product
+    has no inventory record.
+    """
+
+    return get_inventory_status(shipment.product_name)

@@ -31,3 +31,13 @@ class InvestigationNotRequiredError(ValueError):
     request keep working; the dedicated type lets callers tell it apart
     from other invalid input, such as a malformed shipment reference.
     """
+
+
+class InventoryServiceError(BackendServiceError):
+    """
+    Raised when inventory data cannot be loaded, validated or matched.
+    """
+
+
+class InventoryNotFoundError(InventoryServiceError):
+    """Raised when no inventory record exists for a product."""

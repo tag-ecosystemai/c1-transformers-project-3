@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -215,6 +215,163 @@ class PredictionResponse(BaseModel):
             "Indicates whether the shipment should proceed to "
             "agent investigation"
         ),
+    )
+
+
+# ============================================================
+# INVENTORY SCHEMAS
+# ============================================================
+
+
+class InventoryStatusResponse(BaseModel):
+    """
+    The synthetic inventory record held for one product.
+
+    The record describes a product, not a shipment: it does not show
+    that stock is available to fulfil any particular shipment. Every
+    quantity is taken from the inventory dataset as recorded.
+    """
+
+    inventory_id: str = Field(
+        ...,
+        description="Synthetic inventory-record identifier",
+    )
+
+    product_id: str = Field(
+        ...,
+        description=(
+            "Synthetic product identifier. It exists only in the "
+            "inventory dataset and is not a shipment join key"
+        ),
+    )
+
+    product_name: str = Field(
+        ...,
+        description="Product the inventory record describes",
+    )
+
+    category: str = Field(
+        ...,
+        description="Product category",
+    )
+
+    department: str = Field(
+        ...,
+        description="Product department",
+    )
+
+    warehouse_id: str = Field(
+        ...,
+        description=(
+            "Synthetic warehouse identifier, assigned at random and "
+            "unrelated to any shipment"
+        ),
+    )
+
+    warehouse_location: str = Field(
+        ...,
+        description="Location of the synthetic warehouse",
+    )
+
+    warehouse_country: str = Field(
+        ...,
+        description="Country of the synthetic warehouse",
+    )
+
+    supplier_id: str = Field(
+        ...,
+        description=(
+            "Synthetic supplier identifier, assigned at random and "
+            "unrelated to any shipment"
+        ),
+    )
+
+    current_stock: int = Field(
+        ...,
+        ge=0,
+        description="Units in stock",
+    )
+
+    reserved_stock: int = Field(
+        ...,
+        ge=0,
+        description="Units in stock that are already reserved",
+    )
+
+    available_stock: int = Field(
+        ...,
+        ge=0,
+        description="Current stock minus reserved stock",
+    )
+
+    daily_demand: int = Field(
+        ...,
+        gt=0,
+        description="Average units demanded per day",
+    )
+
+    safety_stock: int = Field(
+        ...,
+        ge=0,
+        description="Safety-stock threshold in units",
+    )
+
+    reorder_point: int = Field(
+        ...,
+        ge=0,
+        description="Reorder-point threshold in units",
+    )
+
+    incoming_quantity: int = Field(
+        ...,
+        ge=0,
+        description="Units recorded as incoming",
+    )
+
+    expected_replenishment_date: Optional[date] = Field(
+        default=None,
+        description="Expected replenishment date when one is recorded",
+    )
+
+    inventory_coverage_days: float = Field(
+        ...,
+        ge=0,
+        description=(
+            "Available stock divided by daily demand, as recorded "
+            "(fractional days)"
+        ),
+    )
+
+    stockout_risk: RiskLevel = Field(
+        ...,
+        description="Stockout-risk classification as recorded",
+    )
+
+    below_safety_stock: bool = Field(
+        ...,
+        description="Whether available stock is at or below safety stock",
+    )
+
+    below_reorder_point: bool = Field(
+        ...,
+        description=(
+            "Whether available stock is at or below the reorder point"
+        ),
+    )
+
+    matched_on: str = Field(
+        ...,
+        description="How the record was matched to the requested product",
+    )
+
+    data_source: str = Field(
+        ...,
+        description="Source label of the inventory record",
+    )
+
+    limitations: List[str] = Field(
+        default_factory=list,
+        description="What this inventory evidence does not establish",
     )
 
 

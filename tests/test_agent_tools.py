@@ -10,6 +10,7 @@ from backend.services.agent_tools import (
     get_delay_risk,
     get_destination_weather,
     get_historical_delay_context,
+    get_inventory_coverage,
     get_shipment,
 )
 from backend.services.shipment_service import (
@@ -139,3 +140,24 @@ def test_get_destination_weather_rejects_unmapped_country(shipment):
 
     with pytest.raises(WeatherServiceError, match="Atlantis"):
         get_destination_weather(shipment)
+
+
+def test_get_inventory_coverage_looks_up_the_shipment_product(
+    shipment,
+    monkeypatch,
+):
+    calls = []
+    sentinel = object()
+
+    def fake_inventory_status(product_name):
+        calls.append(product_name)
+        return sentinel
+
+    monkeypatch.setattr(
+        agent_tools,
+        "get_inventory_status",
+        fake_inventory_status,
+    )
+
+    assert get_inventory_coverage(shipment) is sentinel
+    assert calls == ["Trail Running Shoe"]
